@@ -54,6 +54,14 @@ def initialize_reconstruction_dict(
             "num_false_negative_squares": 0,
             "num_multiple_classes": 0,
             "num_true_and_false_positive_squares": 0,
+            "voting_num_boards": 0,
+            "voting_num_squares": 0,
+            "voting_num_true_positive_squares": 0,
+            "voting_num_false_positive_squares": 0,
+            "voting_num_true_negative_squares": 0,
+            "voting_num_false_negative_squares": 0,
+            "voting_num_multiple_classes": 0,
+            "voting_num_true_and_false_positive_squares": 0,
             "classifiers_per_token": counter_T.clone(),
             "classified_per_token": counter_T.clone(),
         }
@@ -71,6 +79,7 @@ def initialized_constructed_boards_dict(
     num_thresholds = threshold_TF11.shape[0]
     for custom_function in custom_functions:
         boards_BLRRC = batch_data[custom_function.__name__]
+
         blank_boards_BLRRC = torch.zeros_like(boards_BLRRC)
         blank_boards_TBLRRC = einops.repeat(
             blank_boards_BLRRC, "B L R1 R2 C -> T B L R1 R2 C", T=num_thresholds
@@ -228,6 +237,23 @@ def aggregate_feature_labels(
     return results, additive_boards
 
 
+def constructed_voting_board(constructed_boards_TBLRRC: torch.Tensor, device: str) -> torch.Tensor:
+    # Find the maximum values and count how many classes have the max value
+    max_values_TBLRR1, _ = torch.max(constructed_boards_TBLRRC, dim=-1, keepdim=True)
+
+    max_values_mask_TBLRRC = constructed_boards_TBLRRC == max_values_TBLRR1
+
+    num_max_TBLRR1 = torch.sum(max_values_mask_TBLRRC, dim=-1, keepdim=True)
+    # Create mask for squares with a unique maximum greater than zero
+    unique_max_mask_TBLRR1 = num_max_TBLRR1 == 1
+
+    indexed_boards_TBLRRC = (
+        constructed_boards_TBLRRC * max_values_mask_TBLRRC * unique_max_mask_TBLRR1
+    )
+
+    return indexed_boards_TBLRRC
+
+
 def compare_constructed_to_true_boards(
     results: dict,
     custom_functions: list[Callable],
@@ -236,60 +262,89 @@ def compare_constructed_to_true_boards(
     device: torch.device,
 ) -> dict:
 
-    for custom_function in custom_functions:
-        true_boards_BLRRC = batch_data[custom_function.__name__]
-        constructed_boards_TBLRRC = constructed_boards[custom_function.__name__]
+    voting_status = [True, False]
 
-        # Make it binary. Any square with multiple counts is now 1.
-        constructed_boards_TBLRRC = (constructed_boards_TBLRRC > 0).int()
+    for voting in voting_status:
+        if voting:
+            voting_str = "voting_"
+        else:
+            voting_str = ""
+        for custom_function in custom_functions:
 
-        true_bords_TBLRRC = einops.repeat(
-            true_boards_BLRRC, "B L R1 R2 C -> T B L R1 R2 C", T=constructed_boards_TBLRRC.shape[0]
-        )
+            true_boards_BLRRC = batch_data[custom_function.__name__]
+            constructed_boards_TBLRRC = constructed_boards[custom_function.__name__]
 
-        multiple_classes_TBLRR = einops.reduce(
-            constructed_boards_TBLRRC, "T B L R1 R2 C -> T B L R1 R2", "sum"
-        )
-        multiple_classes_TBLRR = (multiple_classes_TBLRR > 1).int()
-        multiple_classes_T = einops.reduce(multiple_classes_TBLRR, "T B L R1 R2 -> T", "sum")
+            assert (
+                constructed_boards_TBLRRC >= 0
+            ).all(), f"boards should not have negative values, {constructed_boards_TBLRRC.min()}"
 
-        true_positive_TBLRRC = (true_bords_TBLRRC == 1) & (constructed_boards_TBLRRC == 1)
-        false_positive_TBLRRC = (true_bords_TBLRRC == 0) & (constructed_boards_TBLRRC == 1)
-        true_negative_TBLRRC = (true_bords_TBLRRC == 0) & (constructed_boards_TBLRRC == 0)
-        false_negative_TBLRRC = (true_bords_TBLRRC == 1) & (constructed_boards_TBLRRC == 0)
+            if voting:
+                constructed_boards_TBLRRC = constructed_voting_board(
+                    constructed_boards_TBLRRC, device
+                )
 
-        true_positive_TBLRR = einops.reduce(
-            true_positive_TBLRRC, "T B L R1 R2 C -> T B L R1 R2", "sum"
-        )
-        false_positive_TBLRR = einops.reduce(
-            false_positive_TBLRRC, "T B L R1 R2 C -> T B L R1 R2", "sum"
-        )
+            # Make it binary. Any square with multiple counts is now 1.
+            constructed_boards_TBLRRC = (constructed_boards_TBLRRC > 0).int()
 
-        true_and_false_positive_TBLRR = (true_positive_TBLRR == 1) & (false_positive_TBLRR == 1)
+            true_bords_TBLRRC = einops.repeat(
+                true_boards_BLRRC,
+                "B L R1 R2 C -> T B L R1 R2 C",
+                T=constructed_boards_TBLRRC.shape[0],
+            )
 
-        true_positive_T = einops.reduce(true_positive_TBLRRC, "T B L R1 R2 C -> T", "sum")
-        false_positive_T = einops.reduce(false_positive_TBLRRC, "T B L R1 R2 C -> T", "sum")
-        true_negative_T = einops.reduce(true_negative_TBLRRC, "T B L R1 R2 C -> T", "sum")
-        false_negative_T = einops.reduce(false_negative_TBLRRC, "T B L R1 R2 C -> T", "sum")
-        true_and_false_positive_T = einops.reduce(
-            true_and_false_positive_TBLRR, "T B L R1 R2 -> T", "sum"
-        )
+            multiple_classes_TBLRR = einops.reduce(
+                constructed_boards_TBLRRC, "T B L R1 R2 C -> T B L R1 R2", "sum"
+            )
+            multiple_classes_TBLRR = (multiple_classes_TBLRR > 1).int()
+            multiple_classes_T = einops.reduce(multiple_classes_TBLRR, "T B L R1 R2 -> T", "sum")
 
-        batch_size = true_boards_BLRRC.shape[0]
-        num_board_states = true_boards_BLRRC.shape[1]
-        num_boards = batch_size * num_board_states
-        num_squares = int(true_boards_BLRRC.sum().item())
+            true_positive_TBLRRC = (true_bords_TBLRRC == 1) & (constructed_boards_TBLRRC == 1)
+            false_positive_TBLRRC = (true_bords_TBLRRC == 0) & (constructed_boards_TBLRRC == 1)
+            true_negative_TBLRRC = (true_bords_TBLRRC == 0) & (constructed_boards_TBLRRC == 0)
+            false_negative_TBLRRC = (true_bords_TBLRRC == 1) & (constructed_boards_TBLRRC == 0)
 
-        results[custom_function.__name__]["num_boards"] += num_boards
-        results[custom_function.__name__]["num_squares"] += num_squares
-        results[custom_function.__name__]["num_true_positive_squares"] += true_positive_T
-        results[custom_function.__name__]["num_false_positive_squares"] += false_positive_T
-        results[custom_function.__name__]["num_true_negative_squares"] += true_negative_T
-        results[custom_function.__name__]["num_false_negative_squares"] += false_negative_T
-        results[custom_function.__name__]["num_multiple_classes"] += multiple_classes_T
-        results[custom_function.__name__][
-            "num_true_and_false_positive_squares"
-        ] += true_and_false_positive_T
+            true_positive_TBLRR = einops.reduce(
+                true_positive_TBLRRC, "T B L R1 R2 C -> T B L R1 R2", "sum"
+            )
+            false_positive_TBLRR = einops.reduce(
+                false_positive_TBLRRC, "T B L R1 R2 C -> T B L R1 R2", "sum"
+            )
+
+            true_and_false_positive_TBLRR = (true_positive_TBLRR == 1) & (false_positive_TBLRR == 1)
+
+            true_positive_T = einops.reduce(true_positive_TBLRRC, "T B L R1 R2 C -> T", "sum")
+            false_positive_T = einops.reduce(false_positive_TBLRRC, "T B L R1 R2 C -> T", "sum")
+            true_negative_T = einops.reduce(true_negative_TBLRRC, "T B L R1 R2 C -> T", "sum")
+            false_negative_T = einops.reduce(false_negative_TBLRRC, "T B L R1 R2 C -> T", "sum")
+            true_and_false_positive_T = einops.reduce(
+                true_and_false_positive_TBLRR, "T B L R1 R2 -> T", "sum"
+            )
+
+            batch_size = true_boards_BLRRC.shape[0]
+            num_board_states = true_boards_BLRRC.shape[1]
+            num_boards = batch_size * num_board_states
+            num_squares = int(true_boards_BLRRC.sum().item())
+
+            results[custom_function.__name__][f"{voting_str}num_boards"] += num_boards
+            results[custom_function.__name__][f"{voting_str}num_squares"] += num_squares
+            results[custom_function.__name__][
+                f"{voting_str}num_true_positive_squares"
+            ] += true_positive_T
+            results[custom_function.__name__][
+                f"{voting_str}num_false_positive_squares"
+            ] += false_positive_T
+            results[custom_function.__name__][
+                f"{voting_str}num_true_negative_squares"
+            ] += true_negative_T
+            results[custom_function.__name__][
+                f"{voting_str}num_false_negative_squares"
+            ] += false_negative_T
+            results[custom_function.__name__][
+                f"{voting_str}num_multiple_classes"
+            ] += multiple_classes_T
+            results[custom_function.__name__][
+                f"{voting_str}num_true_and_false_positive_squares"
+            ] += true_and_false_positive_T
 
     return results
 
@@ -311,45 +366,56 @@ def calculate_F1_scores(
 
     epsilon = 1e-8
 
-    for custom_function in custom_functions:
-        num_true_positive_squares_T = results[custom_function.__name__]["num_true_positive_squares"]
-        num_false_positive_squares_T = results[custom_function.__name__][
-            "num_false_positive_squares"
-        ]
-        num_positives_T = num_true_positive_squares_T + num_false_positive_squares_T
+    voting_status = [True, False]
 
-        false_negatives_T = results[custom_function.__name__]["num_false_negative_squares"]
+    for voting in voting_status:
+        if voting:
+            voting_str = "voting_"
+        else:
+            voting_str = ""
+        for custom_function in custom_functions:
+            num_true_positive_squares_T = results[custom_function.__name__][
+                f"{voting_str}num_true_positive_squares"
+            ]
+            num_false_positive_squares_T = results[custom_function.__name__][
+                f"{voting_str}num_false_positive_squares"
+            ]
+            num_positives_T = num_true_positive_squares_T + num_false_positive_squares_T
 
-        precision_T = num_true_positive_squares_T / (num_positives_T + epsilon)
-        recall_T = num_true_positive_squares_T / (
-            num_true_positive_squares_T + false_negatives_T + epsilon
-        )
+            false_negatives_T = results[custom_function.__name__][
+                f"{voting_str}num_false_negative_squares"
+            ]
 
-        # Calculate F1 score
-        f1_scores_T = 2 * (precision_T * recall_T) / (precision_T + recall_T + epsilon)
-        results[custom_function.__name__]["precision_per_class"] = precision_T
-        results[custom_function.__name__]["recall_per_class"] = recall_T
-        results[custom_function.__name__]["f1_score_per_class"] = f1_scores_T
+            precision_T = num_true_positive_squares_T / (num_positives_T + epsilon)
+            recall_T = num_true_positive_squares_T / (
+                num_true_positive_squares_T + false_negatives_T + epsilon
+            )
 
-        num_true_and_false_positive_squares_T = results[custom_function.__name__][
-            "num_true_and_false_positive_squares"
-        ]
+            # Calculate F1 score
+            f1_scores_T = 2 * (precision_T * recall_T) / (precision_T + recall_T + epsilon)
+            results[custom_function.__name__][f"{voting_str}precision_per_class"] = precision_T
+            results[custom_function.__name__][f"{voting_str}recall_per_class"] = recall_T
+            results[custom_function.__name__][f"{voting_str}f1_score_per_class"] = f1_scores_T
 
-        # Any square with both true and false positives is a false positive
-        adjusted_true_positive_squares_T = (
-            num_true_positive_squares_T - num_true_and_false_positive_squares_T
-        )
-        adjusted_positives_T = adjusted_true_positive_squares_T + num_false_positive_squares_T
+            num_true_and_false_positive_squares_T = results[custom_function.__name__][
+                f"{voting_str}num_true_and_false_positive_squares"
+            ]
 
-        precision_T = adjusted_true_positive_squares_T / (adjusted_positives_T + epsilon)
-        recall_T = adjusted_true_positive_squares_T / (
-            adjusted_true_positive_squares_T + false_negatives_T + epsilon
-        )
+            # Any square with both true and false positives is a false positive
+            adjusted_true_positive_squares_T = (
+                num_true_positive_squares_T - num_true_and_false_positive_squares_T
+            )
+            adjusted_positives_T = adjusted_true_positive_squares_T + num_false_positive_squares_T
 
-        f1_scores_T = 2 * (precision_T * recall_T) / (precision_T + recall_T + epsilon)
-        results[custom_function.__name__]["precision_per_square"] = precision_T
-        results[custom_function.__name__]["recall_per_square"] = recall_T
-        results[custom_function.__name__]["f1_score_per_square"] = f1_scores_T
+            precision_T = adjusted_true_positive_squares_T / (adjusted_positives_T + epsilon)
+            recall_T = adjusted_true_positive_squares_T / (
+                adjusted_true_positive_squares_T + false_negatives_T + epsilon
+            )
+
+            f1_scores_T = 2 * (precision_T * recall_T) / (precision_T + recall_T + epsilon)
+            results[custom_function.__name__][f"{voting_str}precision_per_square"] = precision_T
+            results[custom_function.__name__][f"{voting_str}recall_per_square"] = recall_T
+            results[custom_function.__name__][f"{voting_str}f1_score_per_square"] = f1_scores_T
     return results
 
 
@@ -499,6 +565,9 @@ def test_board_reconstructions(
 
             for custom_function in constructed_boards:
                 constructed_boards[custom_function] += additive_boards[custom_function]
+                assert (
+                    constructed_boards[custom_function] > 0
+                ).all(), f"bbbboards should not have negative values, {constructed_boards[custom_function].min()}"
         results = compare_constructed_to_true_boards(
             results, custom_functions, constructed_boards, batch_data, device
         )
