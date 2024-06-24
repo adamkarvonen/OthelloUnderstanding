@@ -12,6 +12,7 @@ from circuits.utils import (
 )
 import circuits.eval_sae_as_classifier as eval_sae
 import circuits.chess_utils as chess_utils
+import circuits.utils as utils
 
 
 def get_all_feature_label_file_names(folder_name: str) -> list[str]:
@@ -498,6 +499,149 @@ def test_board_reconstructions(
 
             for custom_function in constructed_boards:
                 constructed_boards[custom_function] += additive_boards[custom_function]
+        results = compare_constructed_to_true_boards(
+            results, custom_functions, constructed_boards, batch_data, device
+        )
+
+    hyperparameters = {"n_inputs": n_inputs}
+    results["hyperparameters"] = hyperparameters
+    results = normalize_results(results, n_inputs, custom_functions)
+    results = calculate_F1_scores(results, custom_functions, device)
+
+    if print_results:
+        print_out_results(results, custom_functions)
+
+    if save_results:
+        results = to_device(results, "cpu")
+        with open(output_file, "wb") as f:
+            pickle.dump(results, f)
+        results = to_device(results, device)
+    return results
+
+
+def multiple_layer_board_reconstructions(
+    custom_functions: list[Callable],
+    autoencoder_paths: list[str],
+    all_feature_labels: list[dict],
+    output_file: str,
+    n_inputs: int,
+    batch_size: int,
+    device: torch.device,
+    data: dict,
+    othello: bool = False,
+    print_results: bool = False,
+    save_results: bool = True,
+    precomputed: bool = True,
+) -> dict:
+
+    torch.set_grad_enabled(False)
+    feature_batch_size = batch_size
+
+    data, ae_bundle, pgn_strings_bL, encoded_inputs_bL = eval_sae.prep_data_ae_buffer_and_model(
+        autoencoder_paths[0],
+        batch_size,
+        data,
+        device,
+        n_inputs,
+        include_buffer=False,
+    )
+
+    del ae_bundle
+
+    ae_bundles = []
+    for autoencoder_path in autoencoder_paths:
+        ae_bundle = utils.get_ae_bundle(
+            autoencoder_path, device, [], batch_size, include_buffer=False
+        )
+        ae_bundles.append(ae_bundle)
+
+    initial_thresholds_Tf11 = all_feature_labels[0]["thresholds"].to(device)
+    initial_alive_features_f = all_feature_labels[0]["alive_features"].to(device)
+    indexing_function = None
+
+    if all_feature_labels[0]["indexing_function"] in chess_utils.supported_indexing_functions:
+        indexing_function = chess_utils.supported_indexing_functions[
+            all_feature_labels[0]["indexing_function"]
+        ]
+
+    all_feature_labels = to_device(all_feature_labels, device)
+
+    custom_functions = []
+    for key in all_feature_labels[0]:
+        if key in chess_utils.config_lookup:
+            custom_functions.append(chess_utils.config_lookup[key].custom_board_state_function)
+
+    results = initialize_reconstruction_dict(
+        custom_functions, initial_thresholds_Tf11.shape[0], initial_alive_features_f, device
+    )
+
+    n_iters = n_inputs // batch_size
+
+    for i in tqdm(range(n_iters), desc="Aggregating statistics"):
+        start = i * batch_size
+        end = (i + 1) * batch_size
+        pgn_strings_BL = pgn_strings_bL[start:end]
+        encoded_inputs_BL = encoded_inputs_bL[start:end]
+        encoded_inputs_BL = torch.tensor(encoded_inputs_BL).to(device)
+
+        batch_data = eval_sae.get_data_batch(
+            data,
+            pgn_strings_BL,
+            start,
+            end,
+            custom_functions,
+            device,
+            precomputed=precomputed,
+            othello=othello,
+        )
+
+        constructed_boards = initialized_constructed_boards_dict(
+            custom_functions, batch_data, initial_thresholds_Tf11, device
+        )
+
+        for layer in range(len(all_feature_labels)):
+
+            thresholds_Tf11 = all_feature_labels[layer]["thresholds"].to(device)
+            alive_features_f = all_feature_labels[layer]["alive_features"].to(device)
+            num_features = len(alive_features_f)
+
+            all_activations_fBL, encoded_token_inputs = collect_activations_batch(
+                ae_bundles[layer], encoded_inputs_BL, alive_features_f
+            )
+
+            if indexing_function is not None:
+                all_activations_fBL, batch_data = eval_sae.apply_indexing_function(
+                    pgn_strings_bL[start:end],
+                    all_activations_fBL,
+                    batch_data,
+                    device,
+                    indexing_function,
+                )
+
+            # We round up to ensure we don't ignore the remainder of features
+            num_feature_iters = math.ceil(num_features / feature_batch_size)
+
+            # For thousands of features, this would be many GB of memory. So, we minibatch.
+            for feature in range(num_feature_iters):
+                f_start = feature * feature_batch_size
+                f_end = min((feature + 1) * feature_batch_size, num_features)
+                f_batch_size = f_end - f_start
+
+                activations_FBL = all_activations_fBL[f_start:f_end]
+
+                results, additive_boards = aggregate_feature_labels(
+                    results,
+                    all_feature_labels[layer],
+                    custom_functions,
+                    activations_FBL,
+                    thresholds_Tf11[:, f_start:f_end, :, :],
+                    f_start,
+                    f_end,
+                    device,
+                )
+
+                for custom_function in constructed_boards:
+                    constructed_boards[custom_function] += additive_boards[custom_function]
         results = compare_constructed_to_true_boards(
             results, custom_functions, constructed_boards, batch_data, device
         )

@@ -216,8 +216,10 @@ def analyze_sae_groups(
 
     N_GPUS = 1
     RESOURCE_STACK = deque([f"cuda:{i}" for i in range(N_GPUS)])
+    # RESOURCE_STACK = deque([f"cpu" for i in range(N_GPUS)])
 
-    othello = check_all_sae_groups(autoencoder_group_paths)
+    # othello = check_all_sae_groups(autoencoder_group_paths)
+    othello = True
 
     dataset_size = max(config.eval_sae_n_inputs, config.board_reconstruction_n_inputs)
 
@@ -290,26 +292,26 @@ def analyze_sae_groups(
     RESOURCE_STACK.append(device)
     del device
 
-    for autoencoder_group_path in autoencoder_group_paths:
-        new_othello = eval_sae.check_if_autoencoder_is_othello(autoencoder_group_path)
-        assert (
-            new_othello == othello
-        ), "All autoencoders in a group must be trained on the same game"
+    print(f"autoencoder_group_paths: {autoencoder_group_paths}")
 
-        folders = eval_sae.get_nested_folders(autoencoder_group_path)
+    for autoencoder_paths in autoencoder_group_paths:
 
-        def full_eval_pipeline(autoencoder_path):
+        torch.cuda.empty_cache()
 
-            torch.cuda.empty_cache()
+        df = initialize_dataframe(custom_functions)
 
-            df = initialize_dataframe(custom_functions)
+        # For debugging
+        # if "ef=4_lr=1e-03_l1=1e-01_layer_5" not in autoencoder_path:
+        #     return df
 
-            # For debugging
-            # if "ef=4_lr=1e-03_l1=1e-01_layer_5" not in autoencoder_path:
-            #     return df
+        # Grab a GPU off the stack to use
+        device = RESOURCE_STACK.pop()
 
-            # Grab a GPU off the stack to use
-            device = RESOURCE_STACK.pop()
+        all_feature_labels = []
+
+        for autoencoder_path in autoencoder_paths:
+
+            print(f"Starting {autoencoder_path}")
 
             expected_eval_results_output_location = get_eval_results.get_output_location(
                 autoencoder_path, n_inputs=config.eval_results_n_inputs
@@ -392,16 +394,19 @@ def analyze_sae_groups(
                 feature_labels = utils.to_device(feature_labels, device)
                 misc_stats = utils.to_device(misc_stats, device)
 
-            expected_reconstruction_output_location = expected_aggregation_output_location.replace(
-                "results.pkl", "reconstruction.pkl"
-            )
+            all_feature_labels.append(feature_labels)
 
-            if config.run_board_reconstruction:
-                print("Testing board reconstruction")
-                board_reconstruction_results = eval_board_reconstruction.test_board_reconstructions(
+        expected_reconstruction_output_location = expected_aggregation_output_location.replace(
+            "results.pkl", "reconstruction.pkl"
+        )
+
+        if config.run_board_reconstruction:
+            print("Testing board reconstruction")
+            board_reconstruction_results = (
+                eval_board_reconstruction.multiple_layer_board_reconstructions(
                     custom_functions=custom_functions,
-                    autoencoder_path=autoencoder_path,
-                    feature_labels=feature_labels,
+                    autoencoder_paths=autoencoder_paths,
+                    all_feature_labels=all_feature_labels,
                     output_file=expected_reconstruction_output_location,
                     n_inputs=config.board_reconstruction_n_inputs,
                     batch_size=config.batch_size,
@@ -412,132 +417,77 @@ def analyze_sae_groups(
                     save_results=config.save_results,
                     precomputed=config.precompute,
                 )
-            else:
-                with open(expected_reconstruction_output_location, "rb") as f:
-                    board_reconstruction_results = pickle.load(f)
-                board_reconstruction_results = utils.to_device(board_reconstruction_results, device)
-
-            df = append_results(
-                eval_results,
-                aggregation_results,
-                board_reconstruction_results,
-                misc_stats,
-                custom_functions,
-                df,
-                autoencoder_group_path,
-                autoencoder_path,
-                expected_reconstruction_output_location,
             )
+        else:
+            with open(expected_reconstruction_output_location, "rb") as f:
+                board_reconstruction_results = pickle.load(f)
+            board_reconstruction_results = utils.to_device(board_reconstruction_results, device)
 
-            print("Finished", autoencoder_path)
-
-            # Save the dataframe after each autoencoder so we don't lose data if the script crashes
-            output_file = autoencoder_path + "/" + "results.csv"
-            df.to_csv(output_file)
-
-            # Put the GPU back on the stack after we're done
-            RESOURCE_STACK.append(device)
-            return df
-
-        dfs = Parallel(n_jobs=N_GPUS, require="sharedmem")(
-            delayed(full_eval_pipeline)(autoencoder_path) for autoencoder_path in folders
+        df = append_results(
+            eval_results,
+            aggregation_results,
+            board_reconstruction_results,
+            misc_stats,
+            custom_functions,
+            df,
+            autoencoder_group_path="NA",
+            autoencoder_path=autoencoder_path,
+            reconstruction_file=expected_reconstruction_output_location,
         )
 
-        pd.concat(dfs, axis=0, ignore_index=True).to_csv(autoencoder_group_path + "results.csv")
+        print("Finished", autoencoder_path)
 
-    utils.concatenate_csv_files(
-        file_list=[
-            autoencoder_group_path + "results.csv"
-            for autoencoder_group_path in autoencoder_group_paths
-        ],
-        output_file=csv_output_path,
-    )
+        # Save the dataframe after each autoencoder so we don't lose data if the script crashes
+        output_file = autoencoder_path + "/" + "results.csv"
+        df.to_csv(output_file)
 
-    results_filename_filter = str(config.eval_sae_n_inputs) + "_"
-    f1_analysis_thresholds = config.f1_analysis_thresholds.tolist()
+        # Put the GPU back on the stack after we're done
+        RESOURCE_STACK.append(device)
 
-    RESOURCE_STACK = deque([f"cuda:{i}" for i in range(N_GPUS)])
+        # pd.concat(dfs, axis=0, ignore_index=True).to_csv(autoencoder_group_path + "results.csv")
 
-    device = RESOURCE_STACK.pop()
+    # utils.concatenate_csv_files(
+    #     file_list=[
+    #         autoencoder_group_path + "results.csv"
+    #         for autoencoder_group_path in autoencoder_group_paths
+    #     ],
+    #     output_file=csv_output_path,
+    # )
 
-    f1_analysis.complete_analysis_pipeline(
-        autoencoder_group_paths,
-        csv_output_path,
-        results_filename_filter,
-        device,
-        f1_analysis_thresholds,
-    )
+    # results_filename_filter = str(config.eval_sae_n_inputs) + "_"
+    # f1_analysis_thresholds = config.f1_analysis_thresholds.tolist()
 
-    RESOURCE_STACK.append(device)
-    del device
+    # RESOURCE_STACK = deque([f"cuda:{i}" for i in range(N_GPUS)])
+
+    # device = RESOURCE_STACK.pop()
+
+    # f1_analysis.complete_analysis_pipeline(
+    #     autoencoder_group_paths,
+    #     csv_output_path,
+    #     results_filename_filter,
+    #     device,
+    #     f1_analysis_thresholds,
+    # )
+
+    # RESOURCE_STACK.append(device)
+    # del device
 
 
-# NOTE: We are going to check that all autoencoders in a given group are for Chess XOR Othello
-
-othello_group_paths = [
-    "autoencoders/othello-trained_model-layer_5-2024-05-23/othello-trained_model-layer_5-gated",
-    "autoencoders/othello-trained_model-layer_5-2024-05-23/othello-trained_model-layer_5-gated_anneal",
-    "autoencoders/othello-trained_model-layer_5-2024-05-23/othello-trained_model-layer_5-p_anneal",
-    "autoencoders/othello-trained_model-layer_5-2024-05-23/othello-trained_model-layer_5-standard",
-]
-othello_output_path = "autoencoders/othello-trained_model-layer_5-2024-05-23/results.csv"
-
-othello_random_group_paths = [
-    "autoencoders/othello-random_model-layer_5-standard",
-]
-othello_random_output_path = "autoencoders/othello-random_model-layer_5-standard/results.csv"
-
-chess_group_paths = [
-    "autoencoders/chess-trained_model-layer_5-2024-05-23/chess-trained_model-layer_5-gated",
-    "autoencoders/chess-trained_model-layer_5-2024-05-23/chess-trained_model-layer_5-gated_anneal",
-    "autoencoders/chess-trained_model-layer_5-2024-05-23/chess-trained_model-layer_5-p_anneal",
-    "autoencoders/chess-trained_model-layer_5-2024-05-23/chess-trained_model-layer_5-standard",
-]
-chess_output_path = "autoencoders/chess-trained_model-layer_5-2024-05-23/results.csv"
-
-chess_random_group_paths = [
-    "autoencoders/chess-random_model-layer_5-standard",
-]
-chess_random_output_path = "autoencoders/chess-random_model-layer_5-standard/results.csv"
-
-othello_mlp_group_paths = ["autoencoders/othello_mlp_acts_identity_aes/"]
-othello_mlp_output_path = "autoencoders/othello_mlp_acts_identity_aes/results.csv"
-
-chess_mlp_group_paths = ["autoencoders/chess_mlp_acts_identity_aes/"]
-chess_mlp_output_path = "autoencoders/chess_mlp_acts_identity_aes/results.csv"
-
-othello_all_layers_group_paths = ["autoencoders/all_layers_othello_p_anneal_0530/"]
-othello_all_layers_output_path = "autoencoders/all_layers_othello_p_anneal_0530/results.csv"
-
-chess_all_layers_group_paths = ["autoencoders/chess_all_layers_resid/"]
-chess_all_layers_output_path = "autoencoders/chess_all_layers_resid/results.csv"
-
-# We could optionally mix and max othello / chess groups here
-othello_groups = [
-    (othello_group_paths, othello_output_path),
-    (othello_random_group_paths, othello_random_output_path),
-    (othello_mlp_group_paths, othello_mlp_output_path),
-    (othello_all_layers_group_paths, othello_all_layers_output_path),
-]
-chess_groups = [
-    (chess_group_paths, chess_output_path),
-    (chess_random_group_paths, chess_random_output_path),
-    (chess_mlp_group_paths, chess_mlp_output_path),
-    (chess_all_layers_group_paths, chess_all_layers_output_path),
+othello_ae_paths = [
+    [
+        "autoencoders/othello_mlp_acts_identity_aes/layer_3/",
+        "autoencoders/othello_mlp_acts_identity_aes/layer_4/",
+    ]
 ]
 
-othello_test_path = ["autoencoders/testing_othello/"]
-othello_test_output_path = "autoencoders/testing_othello/results.csv"
+othello_output_path = "autoencoders/othello_mlp_acts_identity_aes/group_results.csv"
 
-chess_test_path = ["autoencoders/testing_chess/"]
-chess_test_output_path = "autoencoders/testing_chess/results.csv"
-
-othello_groups = [(othello_test_path, othello_test_output_path)]
-chess_groups = [(chess_test_path, chess_test_output_path)]
+othello_groups = [(othello_ae_paths, othello_output_path)]
 
 if __name__ == "__main__":
     groups = othello_groups
     main_config = p_config.Config()
+    print(main_config)
 
     # To edit the main_config, you can do things like:
     # main_config.eval_sae_n_inputs = 1000
