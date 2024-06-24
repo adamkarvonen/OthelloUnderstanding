@@ -6,6 +6,8 @@ from circuits.othello_engine_utils import (
     OthelloBoardState,
 )
 
+DEFAULT_DTYPE = t.int16
+
 
 def hf_othello_dataset_to_generator(
     dataset_name="taufeeque/othellogpt", split="train", streaming=True, token_mapping=None
@@ -23,9 +25,9 @@ def hf_othello_dataset_to_generator(
 
 
 def board_state_to_RRC(board_state, flip: int = 1) -> t.Tensor:
-    board_state = t.tensor(board_state, dtype=t.int8)
+    board_state = t.tensor(board_state, dtype=DEFAULT_DTYPE)
     board_state *= flip
-    one_hot = t.zeros((8, 8, 3), dtype=t.int8)
+    one_hot = t.zeros((8, 8, 3), dtype=DEFAULT_DTYPE)
     one_hot[..., 0] = (board_state == -1).int()
     one_hot[..., 1] = (board_state == 0).int()
     one_hot[..., 2] = (board_state == 1).int()
@@ -65,7 +67,7 @@ def games_batch_to_valid_moves_BLRRC(batch_str_moves: list[int]) -> t.Tensor:
         board = OthelloBoardState()
         states = []
         for i, move in enumerate(game):
-            moves_board = t.zeros(8, 8, 1, dtype=t.int8)
+            moves_board = t.zeros(8, 8, 1, dtype=DEFAULT_DTYPE)
             board.umpire(move)
             valid_moves_list = board.get_valid_moves()
             for move in valid_moves_list:
@@ -124,10 +126,10 @@ def games_batch_to_state_stack_mine_yours_blank_mask_BLRRC(batch_str_moves: list
 
 
 def board_state_to_lines_RRC(board_state_RR, flip: int) -> t.Tensor:
-    board_state_RR = t.tensor(board_state_RR, dtype=t.int8)
+    board_state_RR = t.tensor(board_state_RR, dtype=DEFAULT_DTYPE)
     board_state_RR *= flip  # Flip the board to standardize the player's perspective
 
-    lines_board_RRC = t.zeros(8, 8, 8, dtype=t.int8)
+    lines_board_RRC = t.zeros(8, 8, 8, dtype=DEFAULT_DTYPE)
 
     # Directions for movement in the format [dx, dy]
     eights = [[-1, 0], [-1, 1], [0, 1], [1, 1], [1, 0], [1, -1], [0, -1], [-1, -1]]
@@ -154,13 +156,13 @@ def board_state_to_lines_RRC(board_state_RR, flip: int) -> t.Tensor:
 
 
 def board_state_to_length_lines_RRC(board_state_RR, flip: int) -> t.Tensor:
-    board_state_RR = t.tensor(board_state_RR, dtype=t.int8)
+    board_state_RR = t.tensor(board_state_RR, dtype=DEFAULT_DTYPE)
     board_state_RR *= flip  # Flip the board to standardize the player's perspective
 
     max_length = 6
     n_directions = 8
 
-    lines_board_RRC = t.zeros(8, 8, (max_length * 8), dtype=t.int8)
+    lines_board_RRC = t.zeros(8, 8, (max_length * 8), dtype=DEFAULT_DTYPE)
 
     # Directions for movement in the format [dx, dy]
     eights = [[-1, 0], [-1, 1], [0, 1], [1, 1], [1, 0], [1, -1], [0, -1], [-1, -1]]
@@ -194,13 +196,13 @@ def board_state_to_length_lines_RRC(board_state_RR, flip: int) -> t.Tensor:
 
 def board_state_to_opponent_length_lines_RRC(board_state_RR, flip: int) -> t.Tensor:
     """In this case, we don't check that the end of the line ends with a `mine` piece."""
-    board_state_RR = t.tensor(board_state_RR, dtype=t.int8)
+    board_state_RR = t.tensor(board_state_RR, dtype=DEFAULT_DTYPE)
     board_state_RR *= flip  # Flip the board to standardize the player's perspective
 
     max_length = 6
     n_directions = 8
 
-    lines_board_RRC = t.zeros(8, 8, (max_length * 8), dtype=t.int8)
+    lines_board_RRC = t.zeros(8, 8, (max_length * 8), dtype=DEFAULT_DTYPE)
 
     # Directions for movement in the format [dx, dy]
     eights = [[-1, 0], [-1, 1], [0, 1], [1, 1], [1, 0], [1, -1], [0, -1], [-1, -1]]
