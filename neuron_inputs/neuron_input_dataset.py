@@ -48,6 +48,7 @@ data = construct_othello_dataset(
     )
 
 
+
 # %%
 # Cache Neuron Activations
 layers = [0, 1]
