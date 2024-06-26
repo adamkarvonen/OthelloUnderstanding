@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from huggingface_hub import hf_hub_download
 import torch
 from nnsight import NNsight
 import json
@@ -450,3 +451,50 @@ def get_model_name(othello: bool) -> str:
         return "Baidicoot/Othello-GPT-Transformer-Lens"
     else:
         return "adamkarvonen/8LayerChessGPT2"
+    
+
+def get_ae(layer: int, node_type: str, repo_dir: str, return_ae_group_dir: bool = False):
+    if node_type == "sae_feature":
+        ae_group_name = 'all_layers_othello_p_anneal_0530_with_lines'
+        ae_group_dir = f'{repo_dir}/autoencoders/{ae_group_name}'
+        ae_type = 'p_anneal'
+        trainer_id = 0
+        ae_path = f'{ae_group_dir}/layer_{layer}/trainer{trainer_id}'
+    elif node_type == "mlp_neuron":
+        ae_group_name = 'othello_mlp_acts_identity_aes_lines' # with_lines
+        ae_group_dir = f'{repo_dir}/autoencoders/{ae_group_name}'
+        ae_type = 'identity'
+        ae_path = f'{ae_group_dir}/layer_{layer}'
+    else:
+        raise ValueError('Invalid node_type')
+
+    # download data from huggingface if needed
+    if not os.path.exists(f'{repo_dir}/autoencoders/{ae_group_name}'):
+        hf_hub_download(repo_id='adamkarvonen/othello_saes', filename=f'{ae_group_name}.zip', local_dir=f'{repo_dir}/autoencoders')
+        # unzip the data
+        os.system(f'unzip {repo_dir}/autoencoders/{ae_group_name}.zip -d {repo_dir}/autoencoders')
+
+    # Initialize the autoencoder
+    if ae_type == 'standard' or ae_type == 'p_anneal':
+        ae = AutoEncoder.from_pretrained(os.path.join(ae_path, 'ae.pt'), device='cuda:0')
+    elif ae_type == 'gated' or ae_type == 'gated_anneal':
+        ae = GatedAutoEncoder.from_pretrained(os.path.join(ae_path, 'ae.pt'), device='cuda:0')
+    elif ae_type == 'standard_new':
+        ae = AutoEncoderNew.from_pretrained(os.path.join(ae_path, 'ae.pt'), device='cuda:0')
+    elif ae_type == 'identity':
+        ae = IdentityDict()
+    else:
+        raise ValueError('Invalid ae_type')
+    
+    if return_ae_group_dir:
+        return ae, ae_group_dir
+    else:
+        return ae
+    
+    
+def get_aes(node_type: str, repo_dir: str):
+    aes = []
+    for layer in range(8):
+        ae = get_ae(layer, node_type, repo_dir)
+        aes.append(ae)
+    return aes

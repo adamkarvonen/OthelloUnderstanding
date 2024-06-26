@@ -33,11 +33,6 @@ autoencoders/testing_chess/trainer4/*
 !autoencoders/testing_chess/trainer4/ae.pt
 !autoencoders/testing_chess/trainer4/config.json
 
-# Ignore all directories under analysis/
-analysis/*/
-
-# But include all files directly under analysis/
-!analysis/*.*
 
 models/*
 !models/meta.pkl

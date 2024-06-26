@@ -5,7 +5,6 @@ import gc
 from IPython.display import HTML, display
 from tqdm import trange
 from typing import Optional
-from circuits.othello_engine_utils import OthelloBoardState, itos, to_board_label
 import circuits.othello_engine_utils as othello_engine_utils
 
 
@@ -617,8 +616,8 @@ def plot_top_k_games(
 class BoardPlayer:
     def __init__(self, game):
         self.game_i = game.cpu().numpy()
-        self.game_s = [itos[move] for move in self.game_i]
-        self.board = OthelloBoardState()
+        self.game_s = [othello_engine_utils.itos[move] for move in self.game_i]
+        self.board = othello_engine_utils.OthelloBoardState()
         self.cur_idx = 0
 
     def _display(self):
@@ -630,7 +629,7 @@ class BoardPlayer:
 
         display(visualize_game_seq(self.game_i, highlight_seq, 2, prefix="Current move: <br>"))
         fig, ax = plt.subplots()
-        move_label = to_board_label(self.game_s[self.cur_idx])
+        move_label = othello_engine_utils.to_board_label(self.game_s[self.cur_idx])
         plot_othello_board_highlighted(
             ax,
             self.board.state,
@@ -650,7 +649,7 @@ class BoardPlayer:
 
     def prev(self):
         if self.cur_idx > 0:
-            self.board = OthelloBoardState()
+            self.board = othello_engine_utils.OthelloBoardState()
             for move in self.game_s[: self.cur_idx]:
                 self.board.umpire(move)
             self._display()

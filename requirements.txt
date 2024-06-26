@@ -20,6 +20,8 @@ jaxtyping==0.2.28
 
 # For OthelloGPT
 transformer_lens==1.17.0
+chess
+jaxtyping
 
 # If running into dependency issues, these exact versions worked on Python 3.11
 

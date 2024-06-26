@@ -2,13 +2,7 @@ import torch as t
 from tqdm import tqdm
 from datasets import load_dataset
 
-from circuits.othello_engine_utils import (
-    OthelloBoardState,
-    stoi_indices,
-    to_board_label,
-    itos,
-    stoi,
-)
+from circuits.othello_engine_utils import OthelloBoardState
 
 DEFAULT_DTYPE = t.int16
 
