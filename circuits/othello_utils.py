@@ -4,6 +4,10 @@ from datasets import load_dataset
 
 from circuits.othello_engine_utils import (
     OthelloBoardState,
+    stoi_indices,
+    to_board_label,
+    itos,
+    stoi,
 )
 
 DEFAULT_DTYPE = t.int16

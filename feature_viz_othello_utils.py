@@ -121,6 +121,23 @@ def visualize_game_seq(context_i, activations, max_value, prefix=""):
     return HTML(combined_html)
 
 
+def cossim_logit_feature_encoder(
+    model, ae, feat_idx: int, node_type: str, layer: Optional[int] = None
+):
+    if node_type == "sae_feature":
+        d_model_vec = ae.encoder.weight[feat_idx, :]
+    elif node_type == "mlp_neuron":
+        if layer == None:
+            raise ValueError("Must specify layer for MLP neuron")
+        d_model_vec = model.blocks[layer].mlp.W_in[:, feat_idx]
+    else:
+        raise ValueError(f"Unknown node type {node_type}")
+    cossim = t.cosine_similarity(
+        d_model_vec, model.W_U[:, 1:].T, dim=1
+    )  # NOTE 0 is a special token?
+    return cossim
+
+
 def cossim_logit_feature_decoder(
     model, ae, feat_idx: int, node_type: str, layer: Optional[int] = None
 ):
@@ -135,6 +152,21 @@ def cossim_logit_feature_decoder(
     cossim = t.cosine_similarity(
         d_model_vec, model.W_U[:, 1:].T, dim=1
     )  # NOTE 0 is a special token?
+    return cossim
+
+
+def cossim_tokenembed_feature_encoder(
+    model, ae, feat_idx: int, node_type: str, layer: Optional[int] = None
+):
+    if node_type == "sae_feature":
+        d_model_vec = ae.encoder.weight[feat_idx, :]
+    elif node_type == "mlp_neuron":
+        if layer == None:
+            raise ValueError("Must specify layer for MLP neuron")
+        d_model_vec = model.blocks[layer].mlp.W_in[:, feat_idx]
+    else:
+        raise ValueError(f"Unknown node type {node_type}")
+    cossim = t.cosine_similarity(d_model_vec, model.W_E[1:, :], dim=1)
     return cossim
 
 
@@ -224,7 +256,7 @@ def visualize_lens(
     visualize_vocab(ax, cossim, title=title, device=device)
 
 
-def plot_lenses(model, ae, feat_idx: int, device: str, node_type: str, layer: Optional[int] = None):
+def plot_lenses_decoder(model, ae, feat_idx: int, device: str, node_type: str, layer: Optional[int] = None):
     fig, axs = plt.subplots(1, 2, figsize=(10, 4))
 
     visualize_lens(
@@ -250,6 +282,34 @@ def plot_lenses(model, ae, feat_idx: int, device: str, node_type: str, layer: Op
         device=device,
     )
     fig.suptitle(f"Cosine sim of #feature {feat_idx} decoder")
+    plt.show()
+
+def plot_lenses_encoder(model, ae, feat_idx: int, device: str, node_type: str, layer: Optional[int] = None):
+    fig, axs = plt.subplots(1, 2, figsize=(10, 4))
+
+    visualize_lens(
+        axs[0],
+        model,
+        ae,
+        feat_idx,
+        node_type,
+        layer,
+        cossim_tokenembed_feature_encoder,
+        title="with token_embed",
+        device=device,
+    )
+    visualize_lens(
+        axs[1],
+        model,
+        ae,
+        feat_idx,
+        node_type,
+        layer,
+        cossim_logit_feature_encoder,
+        title="with unembed (DLA)",
+        device=device,
+    )
+    fig.suptitle(f"Cosine sim of #feature {feat_idx} encoder")
     plt.show()
 
 
