@@ -6,12 +6,13 @@ from IPython.display import HTML, display
 from tqdm import trange
 from typing import Optional
 from circuits.othello_engine_utils import OthelloBoardState, itos, to_board_label
+import circuits.othello_engine_utils as othello_engine_utils
 
 
 def convert_othello_dataset_sample_to_board(sample_i, move_idx=None):
     if type(sample_i) == t.Tensor:
         sample_i = sample_i.tolist()
-    context = [othello_utils.itos[s] for s in sample_i]
+    context = [othello_engine_utils.itos[s] for s in sample_i]
     if move_idx is not None:
         context = context[: move_idx + 1]
     board_state_RR = othello_utils.games_batch_to_state_stack_mine_yours_BLRRC([context])[0][-1]
@@ -106,8 +107,8 @@ def shade(value, max_value):
 
 
 def visualize_game_seq(context_i, activations, max_value, prefix=""):
-    context_s = [othello_utils.itos[s] for s in context_i]
-    labeled_seq = list(map(othello_utils.to_board_label, context_s))
+    context_s = [othello_engine_utils.itos[s] for s in context_i]
+    labeled_seq = list(map(othello_engine_utils.to_board_label, context_s))
     html_elements = []
     for token, act in zip(labeled_seq, activations):
         hex_color = shade(act, max_value)
@@ -187,7 +188,7 @@ def cossim_tokenembed_feature_decoder(
 
 def convert_vocab_to_board_tensor(vocab_vals, device) -> t.Tensor:
     ll_board = t.zeros(64, device=device)
-    ll_board[othello_utils.stoi_indices] = vocab_vals
+    ll_board[othello_engine_utils.stoi_indices] = vocab_vals
     ll_board = ll_board.view(8, 8)
     return ll_board
 
@@ -196,7 +197,7 @@ def convert_seq_to_board_tensor(seq, game, device) -> t.Tensor:
     """The game sequence is a list of token indices, where each token is a single integer. We have to sort by the board indices to get the correct board tensor."""
     # map from token index to board index
     ll_board = t.zeros(64, device=device)
-    game_s = [othello_utils.itos[i] for i in game]
+    game_s = [othello_engine_utils.itos[i] for i in game]
     ll_board[game_s] = seq
     ll_board = ll_board.view(8, 8)
     return ll_board
@@ -220,7 +221,8 @@ def visualize_vocab(ax, vocab_vals, device, title=""):
     ax.set_xticklabels(["A", "B", "C", "D", "E", "F", "G", "H"])
     ax.set_title(title)
 
-def visualize_board_from_tensor(ax, board_tensor, title="", cmap='magma', vmax=None, player=None):
+
+def visualize_board_from_tensor(ax, board_tensor, title="", cmap="magma", vmax=None, player=None):
     if player is not None:
         ll_board = board_tensor.view(8, 8, -1)[player]
     else:
@@ -240,6 +242,7 @@ def visualize_board_from_tensor(ax, board_tensor, title="", cmap='magma', vmax=N
     ax.set_xticks(range(8))
     ax.set_xticklabels(["A", "B", "C", "D", "E", "F", "G", "H"])
     ax.set_title(title)
+
 
 def visualize_lens(
     ax,
@@ -569,7 +572,9 @@ def plot_top_k_games(
         game = games_batch_NS[game_idx].tolist()
         feature_act_S = feature_acts_NS[game_idx]
         max_abs_act, max_act_pos = feature_act_S.abs().max(dim=0)
-        max_act_square = othello_utils.to_board_label(othello_utils.itos[game[max_act_pos]])
+        max_act_square = othello_engine_utils.to_board_label(
+            othello_engine_utils.itos[game[max_act_pos]]
+        )
 
         display(
             visualize_game_seq(game, feature_act_S, max_abs_act, prefix="feature activations: <br>")
@@ -609,7 +614,7 @@ def plot_top_k_games(
 
 
 # Play through a game
-class BoardPlayer():
+class BoardPlayer:
     def __init__(self, game):
         self.game_i = game.cpu().numpy()
         self.game_s = [itos[move] for move in self.game_i]
@@ -619,14 +624,19 @@ class BoardPlayer():
     def _display(self):
         cur_move_highlighted = t.zeros(64)
         cur_move_highlighted[self.game_s[self.cur_idx]] = 1
-        cur_move_highlighted = cur_move_highlighted.view(8,8)
+        cur_move_highlighted = cur_move_highlighted.view(8, 8)
         highlight_seq = t.zeros(59)
         highlight_seq[self.cur_idx] = 1
 
         display(visualize_game_seq(self.game_i, highlight_seq, 2, prefix="Current move: <br>"))
         fig, ax = plt.subplots()
         move_label = to_board_label(self.game_s[self.cur_idx])
-        plot_othello_board_highlighted(ax, self.board.state, bg_board_RR=cur_move_highlighted, title=f'Move {self.cur_idx}: {move_label}')
+        plot_othello_board_highlighted(
+            ax,
+            self.board.state,
+            bg_board_RR=cur_move_highlighted,
+            title=f"Move {self.cur_idx}: {move_label}",
+        )
         plt.show()
 
     def next(self):
@@ -636,14 +646,14 @@ class BoardPlayer():
             self._display()
             self.cur_idx += 1
         else:
-            print('Last move reached.')
+            print("Last move reached.")
 
     def prev(self):
         if self.cur_idx > 0:
             self.board = OthelloBoardState()
-            for move in self.game_s[:self.cur_idx]:
+            for move in self.game_s[: self.cur_idx]:
                 self.board.umpire(move)
             self._display()
             self.cur_idx -= 1
         else:
-            print('First move reached.')
+            print("First move reached.")
