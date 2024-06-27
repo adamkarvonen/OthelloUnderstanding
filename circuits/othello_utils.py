@@ -256,7 +256,7 @@ def board_to_occupied_64(board_state) -> t.Tensor:
     return occupied_RR.flatten()
 
 
-def games_batch_to_classifier_input_BLC(batch_str_moves: list[list[int]]) -> t.Tensor:
+def games_batch_to_input_tokens_classifier_input_BLC(batch_str_moves: list[list[int]]) -> t.Tensor:
     """Shape batch, seq len, classes, where classes = (64 + 64 + 60)
     The first 64 is one hot, indicates which square the player just moved to
     The second 64 indicates which squares are occupied
@@ -282,6 +282,93 @@ def games_batch_to_classifier_input_BLC(batch_str_moves: list[list[int]]) -> t.T
             state[64:128] = occupied_64
             move_pos = 128 + i
             state[move_pos] = 1
+            states.append(state)
+        states = t.stack(states, axis=0)
+        game_stack.append(states)
+    return t.stack(game_stack, axis=0)
+
+
+def games_batch_to_board_state_and_input_tokens_classifier_input_BLC(
+    batch_str_moves: list[list[int]],
+) -> t.Tensor:
+    """Shape batch, seq len, classes, where classes = (64 + 64 + 128 + 60)
+    The first 64 is one hot, indicates which square the player just moved to
+    The second 64 indicates which squares are occupied
+    The next 128 is the board state for mine and yours
+    The last 60 is one hot and indicates the time position of the most recent move"""
+    iterable = tqdm(batch_str_moves) if len(batch_str_moves) > 50 else batch_str_moves
+
+    game_stack = []
+    for game in iterable:
+        if isinstance(game, t.Tensor):
+            game = game.flatten()
+
+        board = OthelloBoardState()
+        states = []
+        for i, move in enumerate(game):
+
+            flip = 1
+            if i % 2 == 1:
+                flip = -1
+
+            state = t.zeros(64 + 64 + 128 + 60, dtype=DEFAULT_DTYPE)
+            board.umpire(move)
+
+            if move >= 0:
+                if move > 63:
+                    raise ValueError(f"Move {move} is out of bounds")
+                state[move] = 1
+            occupied_64 = board_to_occupied_64(board.state)
+
+            state[64:128] = occupied_64
+
+            board_RRC = board_state_to_RRC(board.state, flip)
+
+            state[128:192] = board_RRC[..., 0].flatten()
+            state[192:256] = board_RRC[..., 2].flatten()
+
+            move_pos = 256 + i
+            state[move_pos] = 1
+            states.append(state)
+        states = t.stack(states, axis=0)
+        game_stack.append(states)
+    return t.stack(game_stack, axis=0)
+
+
+def games_batch_to_board_state_classifier_input_BLC(
+    batch_str_moves: list[list[int]],
+) -> t.Tensor:
+    """Shape batch, seq len, classes, where classes = (64 + 64 + 128 + 60)
+    The first 64 is one hot, indicates which square the player just moved to
+    The second 64 indicates which squares are occupied
+    The next 128 is the board state for mine and yours
+    The last 60 is one hot and indicates the time position of the most recent move"""
+    iterable = tqdm(batch_str_moves) if len(batch_str_moves) > 50 else batch_str_moves
+
+    game_stack = []
+    for game in iterable:
+        if isinstance(game, t.Tensor):
+            game = game.flatten()
+
+        board = OthelloBoardState()
+        states = []
+        for i, move in enumerate(game):
+
+            flip = 1
+            if i % 2 == 1:
+                flip = -1
+
+            state = t.zeros(64 + 192, dtype=DEFAULT_DTYPE)
+            board.umpire(move)
+
+            if move >= 0:
+                if move > 63:
+                    raise ValueError(f"Move {move} is out of bounds")
+                state[move] = 1
+
+            board_RRC = board_state_to_RRC(board.state, flip)
+
+            state[64:] = board_RRC.flatten()
             states.append(state)
         states = t.stack(states, axis=0)
         game_stack.append(states)
