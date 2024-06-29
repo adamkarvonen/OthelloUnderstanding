@@ -257,10 +257,11 @@ def board_to_occupied_64(board_state) -> t.Tensor:
 
 
 def games_batch_to_input_tokens_classifier_input_BLC(batch_str_moves: list[list[int]]) -> t.Tensor:
-    """Shape batch, seq len, classes, where classes = (64 + 64 + 60)
+    """Shape batch, seq len, classes, where classes = (64 + 64 + 60 + 5)
     The first 64 is one hot, indicates which square the player just moved to
     The second 64 indicates which squares are occupied
-    The last 60 is one hot and indicates the time position of the most recent move"""
+    The last 60 is one hot and indicates the time position of the most recent move.
+    The last 5 are ints indicating the row, col, time position, is_black, is_white"""
     iterable = tqdm(batch_str_moves) if len(batch_str_moves) > 50 else batch_str_moves
 
     game_stack = []
@@ -300,9 +301,10 @@ def games_batch_to_input_tokens_classifier_input_BLC(batch_str_moves: list[list[
 def games_batch_to_input_tokens_flipped_classifier_input_BLC(
     batch_str_moves: list[list[int]],
 ) -> t.Tensor:
-    """Shape batch, seq len, classes, where classes = (64 + 64 + 60)
+    """Shape batch, seq len, classes, where classes = (64 + 64 + 64 + 60)
     The first 64 is one hot, indicates which square the player just moved to
     The second 64 indicates which squares are occupied
+    The third 64 indicates which squares have been flipped
     The last 60 is one hot and indicates the time position of the most recent move"""
     iterable = tqdm(batch_str_moves) if len(batch_str_moves) > 50 else batch_str_moves
 
@@ -350,6 +352,7 @@ def games_batch_to_input_tokens_flipped_classifier_input_BLC(
 def games_batch_to_input_tokens_parity_classifier_input_BLC(
     batch_str_moves: list[list[int]],
 ) -> t.Tensor:
+    """Experimental function, indicates which squares were played by either player. Seems to have poor results."""
     iterable = tqdm(batch_str_moves) if len(batch_str_moves) > 50 else batch_str_moves
 
     game_stack = []
@@ -445,10 +448,13 @@ def games_batch_to_board_state_and_input_tokens_classifier_input_BLC(
 def games_batch_to_input_tokens_flipped_bs_classifier_input_BLC(
     batch_str_moves: list[list[int]],
 ) -> t.Tensor:
-    """Shape batch, seq len, classes, where classes = (64 + 64 + 60)
+    """Shape batch, seq len, classes, where classes = (64 + 64 + 64 + 192 + 60 + 5)
     The first 64 is one hot, indicates which square the player just moved to
     The second 64 indicates which squares are occupied
-    The last 60 is one hot and indicates the time position of the most recent move"""
+    The third 64 indicates which squares have been flipped
+    The next 192 is the board state for mine and yours and blank
+    The last 60 is one hot and indicates the time position of the most recent move
+    The last 5 are ints indicating the row, col, time position, is_black, is_white"""
     iterable = tqdm(batch_str_moves) if len(batch_str_moves) > 50 else batch_str_moves
 
     game_stack = []
