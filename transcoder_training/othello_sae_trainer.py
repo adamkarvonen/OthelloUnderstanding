@@ -62,9 +62,10 @@ def run_sae_training(
     num_tokens = 200_000_000
 
     # sae training parameters
-    random_seeds = t.arange(10).tolist()
+    # random_seeds = t.arange(10).tolist()
+    random_seeds = [0]
     steps = int(num_tokens / sae_batch_size)  # Total number of batches to train
-    save_steps = int(steps / 4)
+    save_steps = None
     warmup_steps = 1000  # Warmup period at start of training and after each resample
     resample_steps = None
     p_start = 1
@@ -155,14 +156,14 @@ def run_sae_training(
 
 if __name__ == "__main__":
     args = get_args()
-    # for layer in range(8):
-    run_sae_training(
-        layer=5,
-        save_dir=args.save_dir,
-        device="cuda:0",
-        dry_run=args.dry_run,
-        no_wandb_logging=args.no_wandb_logging,
-        transcoder=args.transcoder,
-    )
+    for layer in range(8):
+        run_sae_training(
+            layer=layer,
+            save_dir=args.save_dir,
+            device="cuda:0",
+            dry_run=args.dry_run,
+            no_wandb_logging=args.no_wandb_logging,
+            transcoder=args.transcoder,
+        )
     t.cuda.empty_cache()
     gc.collect()
