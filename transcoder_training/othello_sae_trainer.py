@@ -3,6 +3,7 @@
 import argparse
 import torch as t
 import gc
+import itertools
 
 from circuits.utils import (
     othello_hf_dataset_to_generator,
@@ -28,7 +29,7 @@ from circuits.dictionary_learning.trainers.p_anneal_new import PAnnealTrainerNew
 from circuits.dictionary_learning.trainers.standard import StandardTrainer
 from circuits.dictionary_learning.trainers.p_anneal_new import PAnnealTrainerNew
 from circuits.dictionary_learning.trainers.standard_new import StandardTrainerNew
-
+from circuits.dictionary_learning.trainers.transcoder_p_anneal import TranscoderPAnnealTrainer
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -64,6 +65,10 @@ def run_sae_training(
     # sae training parameters
     # random_seeds = t.arange(10).tolist()
     random_seeds = [0]
+    initial_sparsity_penalties = t.linspace(.008, .1, 7).tolist()
+    learning_rates = [0.003, 0.0003, 0.0003]
+
+
     steps = int(num_tokens / sae_batch_size)  # Total number of batches to train
     save_steps = None
     warmup_steps = 1000  # Warmup period at start of training and after each resample
@@ -71,12 +76,10 @@ def run_sae_training(
     p_start = 1
     p_end = 0.2
     anneal_end = None  # steps - int(steps/10)
-    learning_rate = 0.0003162277571391314
     expansion_factor = 8
     sparsity_queue_length = 10
     anneal_start = 1000
     n_sparsity_updates = 10
-    initial_sparsity_penalty = 0.03162277489900589   
 
     log_steps = 5 # Log the training on wandb
     if no_wandb_logging:
@@ -89,9 +92,11 @@ def run_sae_training(
         dataset_name, context_length=context_length, split="train", streaming=True
     )
     if transcoder:
-        io = "in"
+        trainer_class = TranscoderPAnnealTrainer
+        io = "in_and_out"
         submodule = model.blocks[layer].mlp
     else:
+        trainer_class = PAnnealTrainer
         io = "out"
         # submodule = model.blocks[layer].hook_resid_post # resid_post
         submodule = model.blocks[layer].hook_mlp_out # resid_post
@@ -112,10 +117,10 @@ def run_sae_training(
 
     # create the list of configs
     trainer_configs = []
-    for seed in random_seeds:
+    for seed, initial_sparsity_penalty, learning_rate in itertools.product(random_seeds, initial_sparsity_penalties, learning_rates):
         trainer_configs.append(
             {
-                "trainer": PAnnealTrainer,
+                "trainer": trainer_class,
                 "dict_class": AutoEncoder,
                 "activation_dim": activation_dim,
                 "dict_size": expansion_factor * activation_dim,
@@ -152,6 +157,7 @@ def run_sae_training(
             save_steps=save_steps,
             save_dir=save_dir,
             log_steps=log_steps,
+            transcoder=transcoder,
         )
 
 if __name__ == "__main__":
