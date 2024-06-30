@@ -13,7 +13,7 @@ from tqdm import tqdm
 from transformers import GPT2LMHeadModel
 from transformer_lens import HookedTransformer
 from enum import Enum
-from typing import Optional
+from typing import Optional, Union
 import pandas as pd
 
 from circuits.dictionary_learning.buffer import NNsightActivationBuffer
@@ -452,31 +452,50 @@ def get_model_name(othello: bool) -> str:
     else:
         return "adamkarvonen/8LayerChessGPT2"
 
+def get_single_ae(full_path: str, ae_type: str, device: str) -> Union[AutoEncoder, GatedAutoEncoder, AutoEncoderNew, IdentityDict]:
+    # Initialize the autoencoder
+    if ae_type == "standard" or ae_type == "p_anneal":
+        ae = AutoEncoder.from_pretrained(os.path.join(full_path, "ae.pt"), device=device)
+    elif ae_type == "gated" or ae_type == "gated_anneal":
+        ae = GatedAutoEncoder.from_pretrained(os.path.join(full_path, "ae.pt"), device=device)
+    elif ae_type == "standard_new":
+        ae = AutoEncoderNew.from_pretrained(os.path.join(full_path, "ae.pt"), device=device)
+    elif ae_type == "identity":
+        ae = IdentityDict()
+    else:
+        raise ValueError("Invalid ae_type")
+    
+    return ae
 
-def get_ae(layer: int, node_type: str, repo_dir: str, return_ae_group_dir: bool = False):
+def get_ae(layer: int, node_type: str, repo_dir: str, ae_group_name: str = None, return_ae_group_dir: bool = False, device: str = 'cpu'):
     if node_type == "sae_feature":
-        ae_group_name = "all_layers_othello_p_anneal_0530"
+        if ae_group_name is None:
+            ae_group_name = "othello_all_layers_p_anneal_0524"
         ae_group_dir = f"{repo_dir}/autoencoders/{ae_group_name}"
         ae_type = "p_anneal"
         trainer_id = 0
         ae_path = f"{ae_group_dir}/layer_{layer}/trainer{trainer_id}"
     elif node_type == "sae_mlp_feature":
-        ae_group_name = "othello_all_mlps_p_anneal_0531"
+        if ae_group_name is None:
+            ae_group_name = "othello_all_mlps_p_anneal_0531"
         ae_group_dir = f"{repo_dir}/autoencoders/{ae_group_name}"
         ae_type = "p_anneal"
         ae_path = f"{ae_group_dir}/layer_{layer}"
     elif node_type == "sae_mlp_out_feature":
-        ae_group_name = "othello_mlp_out_all_layers_panneal_0628"
+        if ae_group_name is None:
+            ae_group_name = "othello_mlp_out_all_layers_panneal_0628"
         ae_group_dir = f"{repo_dir}/autoencoders/{ae_group_name}"
         ae_type = "p_anneal"
         ae_path = f"{ae_group_dir}/layer_{layer}"
     elif node_type == "mlp_neuron":
-        ae_group_name = "othello_mlp_acts_identity_aes_lines"  # with_lines
+        if ae_group_name is None:
+            ae_group_name = "othello_mlp_acts_identity_aes_lines"  # with_lines
         ae_group_dir = f"{repo_dir}/autoencoders/{ae_group_name}"
         ae_type = "identity"
         ae_path = f"{ae_group_dir}/layer_{layer}"
     elif node_type == "attention_out" or node_type == "mlp_out":
-        ae_group_name = "othello_resid_acts_identity_aes"
+        if ae_group_name is None:
+            ae_group_name = "othello_resid_acts_identity_aes"
         ae_group_dir = f"{repo_dir}/autoencoders/{ae_group_name}"
         ae_type = "identity"
         ae_path = f"{ae_group_dir}/layer_{layer}"
@@ -493,17 +512,7 @@ def get_ae(layer: int, node_type: str, repo_dir: str, return_ae_group_dir: bool 
         # unzip the data
         os.system(f"unzip {repo_dir}/autoencoders/{ae_group_name}.zip -d {repo_dir}/autoencoders")
 
-    # Initialize the autoencoder
-    if ae_type == "standard" or ae_type == "p_anneal":
-        ae = AutoEncoder.from_pretrained(os.path.join(ae_path, "ae.pt"), device="cuda:0")
-    elif ae_type == "gated" or ae_type == "gated_anneal":
-        ae = GatedAutoEncoder.from_pretrained(os.path.join(ae_path, "ae.pt"), device="cuda:0")
-    elif ae_type == "standard_new":
-        ae = AutoEncoderNew.from_pretrained(os.path.join(ae_path, "ae.pt"), device="cuda:0")
-    elif ae_type == "identity":
-        ae = IdentityDict()
-    else:
-        raise ValueError("Invalid ae_type")
+    ae = get_single_ae(ae_path, ae_type, device)
 
     if return_ae_group_dir:
         return ae, ae_group_dir
