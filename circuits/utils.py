@@ -478,13 +478,15 @@ def get_ae(
     ae_group_name: str = None,
     return_ae_group_dir: bool = False,
     device: str = "cpu",
+    trainer_id: Optional[int] = None,
 ):
     if node_type == "sae_feature":
         if ae_group_name is None:
             ae_group_name = "othello_all_layers_p_anneal_0524"
         ae_group_dir = f"{repo_dir}/autoencoders/{ae_group_name}"
         ae_type = "p_anneal"
-        trainer_id = 0
+        if trainer_id is None:
+            trainer_id = 0
         ae_path = f"{ae_group_dir}/layer_{layer}/trainer{trainer_id}"
     elif node_type == "sae_mlp_feature":
         if ae_group_name is None:
@@ -497,14 +499,16 @@ def get_ae(
             ae_group_name = "mlp_out_sweep_all_layers_panneal_0628"
         ae_group_dir = f"{repo_dir}/autoencoders/{ae_group_name}"
         ae_type = "p_anneal"
-        trainer_id = 8
+        if trainer_id is None:
+            trainer_id = 8
         ae_path = f"{ae_group_dir}/layer_{layer}/trainer{trainer_id}"
     elif node_type == "transcoder":
         if ae_group_name is None:
             ae_group_name = "mlp_transcoder_all_layers_panneal_0628"
         ae_group_dir = f"{repo_dir}/autoencoders/{ae_group_name}"
         ae_type = "p_anneal"
-        trainer_id = 2
+        if trainer_id is None:
+            trainer_id = 2
         ae_path = f"{ae_group_dir}/layer_{layer}/trainer{trainer_id}"
     elif node_type == "mlp_neuron":
         if ae_group_name is None:
@@ -522,14 +526,14 @@ def get_ae(
         raise ValueError("Invalid node_type")
 
     # download data from huggingface if needed
-    # if not os.path.exists(f"{repo_dir}/autoencoders/{ae_group_name}"):
-    #     hf_hub_download(
-    #         repo_id="adamkarvonen/othello_saes",
-    #         filename=f"{ae_group_name}.zip",
-    #         local_dir=f"{repo_dir}/autoencoders",
-    #     )
-    #     # unzip the data
-    #     os.system(f"unzip {repo_dir}/autoencoders/{ae_group_name}.zip -d {repo_dir}/autoencoders")
+    if not os.path.exists(f"{repo_dir}/autoencoders/{ae_group_name}"):
+        hf_hub_download(
+            repo_id="adamkarvonen/othello_saes",
+            filename=f"{ae_group_name}.zip",
+            local_dir=f"{repo_dir}/autoencoders",
+        )
+        # unzip the data
+        os.system(f"unzip {repo_dir}/autoencoders/{ae_group_name}.zip -d {repo_dir}/autoencoders")
 
     ae = get_single_ae(ae_path, ae_type, device)
 
@@ -539,9 +543,9 @@ def get_ae(
         return ae
 
 
-def get_aes(node_type: str, repo_dir: str):
+def get_aes(node_type: str, repo_dir: str, trainer_id: Optional[int] = None):
     aes = []
     for layer in range(8):
-        ae = get_ae(layer, node_type, repo_dir)
+        ae = get_ae(layer, node_type, repo_dir, trainer_id=trainer_id)
         aes.append(ae)
     return aes
