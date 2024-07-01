@@ -467,13 +467,20 @@ def get_single_ae(full_path: str, ae_type: str, device: str) -> Union[AutoEncode
     
     return ae
 
-def get_ae(layer: int, node_type: str, repo_dir: str, ae_group_name: str = None, return_ae_group_dir: bool = False, device: str = 'cpu'):
+def get_ae(
+        layer: int,
+        node_type: str, 
+        repo_dir: str, 
+        ae_group_name: str = None, 
+        return_ae_group_dir: bool = False, 
+        trainer_id: int = 0, 
+        device: str = 'cpu'
+    ):
     if node_type == "sae_feature":
         if ae_group_name is None:
             ae_group_name = "othello_all_layers_p_anneal_0524"
         ae_group_dir = f"{repo_dir}/autoencoders/{ae_group_name}"
         ae_type = "p_anneal"
-        trainer_id = 0
         ae_path = f"{ae_group_dir}/layer_{layer}/trainer{trainer_id}"
     elif node_type == "sae_mlp_feature":
         if ae_group_name is None:
