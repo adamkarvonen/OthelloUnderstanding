@@ -43,7 +43,6 @@ def load_model_and_data(model_name: str, dataset_size: int, custom_functions: li
     return model, data
 
 
-# Cache Neuron Activations
 def cache_neuron_activations(
     model, data: dict, layers: list, batch_size: int, n_batches: int
 ) -> dict:
@@ -93,12 +92,10 @@ def get_submodule_dict(model, model_name: str, layers: list, input_location: str
 
 def cache_sae_activations(
     model,
-    model_name: str,
     data: dict,
     layers: list,
     batch_size: int,
     n_batches: int,
-    repo_dir: str,
     input_location: str,
     ae_dict: dict,
     submodule_dict: dict,
@@ -152,14 +149,13 @@ def calculate_binary_activations(neuron_acts: dict, threshold: float = 0.1):
     return binary_acts
 
 
-# Prepare data for modeling
 def prepare_data(games_BLC: torch.Tensor, mlp_acts_BLD: torch.Tensor):
+    """sklearn.fit requires 2D input, so we need to flatten the batch and sequence dimensions."""
     X = einops.rearrange(games_BLC, "b l c -> (b l) c").cpu().numpy()
     y = einops.rearrange(mlp_acts_BLD, "b l d -> (b l) d").cpu().numpy()
     return train_test_split(X, y, test_size=0.2, random_state=42)
 
 
-# Train and evaluate models
 def train_and_evaluate(model, X_train, X_test, y_train, y_test):
     model.fit(X_train, y_train)
     y_pred = model.predict(X_test)
@@ -196,27 +192,27 @@ def train_and_evaluate_xgb(X_train, X_test, y_train, y_test, is_binary=False):
         return model, mse, r2
 
 
-def calculate_neuron_metrics(model, X, y):
-    y_pred = model.predict(X)
+def calculate_neuron_metrics(model, X_BF, y_BF):
+    y_pred_BF = model.predict(X_BF)
 
     # Calculate MSE for all neurons at once
-    mse_list = np.mean((y - y_pred) ** 2, axis=0)
+    mse_list_F = np.mean((y_BF - y_pred_BF) ** 2, axis=0)
 
     # Calculate R2 for all neurons at once
-    ss_res = np.sum((y - y_pred) ** 2, axis=0)
-    ss_tot = np.sum((y - np.mean(y, axis=0)) ** 2, axis=0)
+    ss_res = np.sum((y_BF - y_pred_BF) ** 2, axis=0)
+    ss_tot = np.sum((y_BF - np.mean(y_BF, axis=0)) ** 2, axis=0)
 
     # Add divide-by-zero protection
     with np.errstate(divide="ignore", invalid="ignore"):
-        r2_list = 1 - (ss_res / ss_tot)
+        r2_list_F = 1 - (ss_res / ss_tot)
 
     # Handle cases where ss_tot is zero
-    r2_list = np.where(ss_tot == 0, 0, r2_list)
+    r2_list_F = np.where(ss_tot == 0, 0, r2_list_F)
 
     # Clip R2 values to be between 0 and 1
-    r2_list = np.clip(r2_list, 0, 1)
+    r2_list_F = np.clip(r2_list_F, 0, 1)
 
-    return mse_list, r2_list
+    return mse_list_F, r2_list_F
 
 
 def calculate_binary_metrics(model, X, y):
@@ -244,7 +240,6 @@ def calculate_binary_metrics(model, X, y):
     return accuracy, precision, recall, f1
 
 
-# Print decision tree rules
 def print_decision_tree_rules(model, feature_names, neuron_index, max_depth=None):
     tree = model.estimators_[neuron_index]
     if feature_names is None:
@@ -258,7 +253,6 @@ def rc_to_square_notation(row, col):
     letters = "ABCDEFGH"
     letter = letters[row]
     number = 8 - col
-    # letter = letters[col]
     return f"{letter}{number}"
 
 
@@ -656,13 +650,15 @@ model_name = "Baidicoot/Othello-GPT-Transformer-Lens"
 batch_size = 10
 n_batches = 2
 dataset_size = batch_size * n_batches
-layers = list(range(8))
+num_layers = 8
+layers = list(range(num_layers))
 threshold = 0.7
 max_depth = 8
+num_cores = 8
 
 intervention_layers = []
 
-for i in range(8):
+for i in range(num_layers):
     intervention_layers.append([i])
 
 
@@ -713,12 +709,10 @@ for combination in combinations:
 
         neuron_acts = cache_sae_activations(
             model,
-            model_name,
             train_data,
             layers,
             batch_size,
             n_batches,
-            repo_dir,
             input_location,
             ae_dict,
             submodule_dict,
@@ -739,7 +733,7 @@ for combination in combinations:
 
         decision_trees = compute_predictors(
             custom_functions=custom_functions,
-            num_cores=8,
+            num_cores=num_cores,
             layers=layers,
             data=train_data,
             neuron_acts=neuron_acts,
