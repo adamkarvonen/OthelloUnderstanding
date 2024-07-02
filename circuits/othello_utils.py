@@ -450,10 +450,8 @@ def games_batch_to_input_tokens_flipped_bs_classifier_input_BLC(
 ) -> t.Tensor:
     """Shape batch, seq len, classes, where classes = (64 + 64 + 64 + 192 + 60 + 5)
     The first 64 is one hot, indicates which square the player just moved to
-    The second 64 indicates which squares are occupied
-    The third 64 indicates which squares have been flipped
+    The second 64 indicates which squares have been flipped
     The next 192 is the board state for mine and yours and blank
-    The last 60 is one hot and indicates the time position of the most recent move
     The last 5 are ints indicating the row, col, time position, is_black, is_white"""
     iterable = tqdm(batch_str_moves) if len(batch_str_moves) > 50 else batch_str_moves
 
@@ -471,7 +469,7 @@ def games_batch_to_input_tokens_flipped_bs_classifier_input_BLC(
             if i % 2 == 1:
                 flip = -1
 
-            state = t.zeros(64 + 64 + 64 + 192 + 60 + 5, dtype=DEFAULT_DTYPE)
+            state = t.zeros(64 + 64 + 192 + 5, dtype=DEFAULT_DTYPE)
             board.umpire(move)
 
             if move >= 0:
@@ -479,30 +477,21 @@ def games_batch_to_input_tokens_flipped_bs_classifier_input_BLC(
                     raise ValueError(f"Move {move} is out of bounds")
                 state[move] = 1
 
-            occupied_64 = board_to_occupied_64(board.state)
-            state[64:128] = occupied_64
-
             cur_board_RRC = board_state_to_RRC(board.state, flip=1)
 
-            prev_board_RRC[..., 1] = 0
-            cur_board_RRC[..., 1] = 0
             diff_board_RRC = cur_board_RRC - prev_board_RRC
 
             # This finds all squares that have been flipped
             diff_board_RR = (diff_board_RRC[:, :, 0] * diff_board_RRC[:, :, 2] == -1).float()
 
-            state[128:192] = diff_board_RR.flatten()
+            state[64:128] = diff_board_RR.flatten()
 
             prev_board_RRC = cur_board_RRC
 
             board_state_RRC = board_state_to_RRC(board.state, flip=flip)
-            state[192:384] = board_state_RRC.flatten()
+            state[128:320] = board_state_RRC.flatten()
 
-            move_pos = 128 + 64 + 192 + i
-            state[move_pos] = 1
-            states.append(state)
-
-            offset = 128 + 64 + 192 + 60
+            offset = 128 + 192
             row = i // 8
             col = i % 8
             state[offset + 0] = row
@@ -510,6 +499,78 @@ def games_batch_to_input_tokens_flipped_bs_classifier_input_BLC(
             state[offset + 2] = i
             state[offset + 3] = i % 2 == 1
             state[offset + 4] = i % 2 == 0
+
+            states.append(state)
+
+        states = t.stack(states, axis=0)
+        game_stack.append(states)
+    return t.stack(game_stack, axis=0)
+
+
+def games_batch_to_input_tokens_flipped_bs_valid_moves_classifier_input_BLC(
+    batch_str_moves: list[list[int]],
+) -> t.Tensor:
+    """Shape batch, seq len, classes, where classes = (64 + 64 + 64 + 192 + 60 + 5)
+    The first 64 is one hot, indicates which square the player just moved to
+    The second 64 indicates which squares have been flipped
+    The next 192 is the board state for mine and yours and blank
+    The next 64 is the valid moves
+    The last 5 are ints indicating the row, col, time position, is_black, is_white"""
+    iterable = tqdm(batch_str_moves) if len(batch_str_moves) > 50 else batch_str_moves
+
+    game_stack = []
+    for game in iterable:
+        if isinstance(game, t.Tensor):
+            game = game.flatten()
+
+        board = OthelloBoardState()
+        states = []
+        prev_board_RRC = board_state_to_RRC(board.state, flip=1)
+        for i, move in enumerate(game):
+
+            flip = 1
+            if i % 2 == 1:
+                flip = -1
+
+            state = t.zeros(64 + 64 + 64 + 192 + 5, dtype=DEFAULT_DTYPE)
+            board.umpire(move)
+
+            if move >= 0:
+                if move > 63:
+                    raise ValueError(f"Move {move} is out of bounds")
+                state[move] = 1
+
+            cur_board_RRC = board_state_to_RRC(board.state, flip=1)
+
+            diff_board_RRC = cur_board_RRC - prev_board_RRC
+
+            # This finds all squares that have been flipped
+            diff_board_RR = (diff_board_RRC[:, :, 0] * diff_board_RRC[:, :, 2] == -1).float()
+
+            state[64:128] = diff_board_RR.flatten()
+
+            prev_board_RRC = cur_board_RRC
+
+            board_state_RRC = board_state_to_RRC(board.state, flip=flip)
+            state[128:320] = board_state_RRC.flatten()
+
+            moves_board = t.zeros(8, 8, 1, dtype=DEFAULT_DTYPE)
+            valid_moves_list = board.get_valid_moves()
+            for move in valid_moves_list:
+                moves_board[move // 8, move % 8] = 1
+
+            state[320:384] = moves_board.flatten()
+
+            offset = 128 + 192 + 64
+            row = i // 8
+            col = i % 8
+            state[offset + 0] = row
+            state[offset + 1] = col
+            state[offset + 2] = i
+            state[offset + 3] = i % 2 == 1
+            state[offset + 4] = i % 2 == 0
+
+            states.append(state)
 
         states = t.stack(states, axis=0)
         game_stack.append(states)

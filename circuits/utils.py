@@ -452,7 +452,10 @@ def get_model_name(othello: bool) -> str:
     else:
         return "adamkarvonen/8LayerChessGPT2"
 
-def get_single_ae(full_path: str, ae_type: str, device: str) -> Union[AutoEncoder, GatedAutoEncoder, AutoEncoderNew, IdentityDict]:
+
+def get_single_ae(
+    full_path: str, ae_type: str, device: str
+) -> Union[AutoEncoder, GatedAutoEncoder, AutoEncoderNew, IdentityDict]:
     # Initialize the autoencoder
     if ae_type == "standard" or ae_type == "p_anneal":
         ae = AutoEncoder.from_pretrained(os.path.join(full_path, "ae.pt"), device=device)
@@ -464,23 +467,26 @@ def get_single_ae(full_path: str, ae_type: str, device: str) -> Union[AutoEncode
         ae = IdentityDict()
     else:
         raise ValueError("Invalid ae_type")
-    
+
     return ae
 
+
 def get_ae(
-        layer: int,
-        node_type: str, 
-        repo_dir: str, 
-        ae_group_name: str = None, 
-        return_ae_group_dir: bool = False, 
-        trainer_id: int = 0, 
-        device: str = 'cpu'
-    ):
+    layer: int,
+    node_type: str,
+    repo_dir: str,
+    ae_group_name: str = None,
+    return_ae_group_dir: bool = False,
+    device: str = "cpu",
+    trainer_id: Optional[int] = None,
+):
     if node_type == "sae_feature":
         if ae_group_name is None:
             ae_group_name = "othello_all_layers_p_anneal_0524"
         ae_group_dir = f"{repo_dir}/autoencoders/{ae_group_name}"
         ae_type = "p_anneal"
+        if trainer_id is None:
+            trainer_id = 0
         ae_path = f"{ae_group_dir}/layer_{layer}/trainer{trainer_id}"
     elif node_type == "sae_mlp_feature":
         if ae_group_name is None:
@@ -490,10 +496,20 @@ def get_ae(
         ae_path = f"{ae_group_dir}/layer_{layer}"
     elif node_type == "sae_mlp_out_feature":
         if ae_group_name is None:
-            ae_group_name = "othello_mlp_out_all_layers_panneal_0628"
+            ae_group_name = "mlp_out_sweep_all_layers_panneal_0628"
         ae_group_dir = f"{repo_dir}/autoencoders/{ae_group_name}"
         ae_type = "p_anneal"
-        ae_path = f"{ae_group_dir}/layer_{layer}"
+        if trainer_id is None:
+            trainer_id = 8
+        ae_path = f"{ae_group_dir}/layer_{layer}/trainer{trainer_id}"
+    elif node_type == "transcoder":
+        if ae_group_name is None:
+            ae_group_name = "mlp_transcoder_all_layers_panneal_0628"
+        ae_group_dir = f"{repo_dir}/autoencoders/{ae_group_name}"
+        ae_type = "p_anneal"
+        if trainer_id is None:
+            trainer_id = 2
+        ae_path = f"{ae_group_dir}/layer_{layer}/trainer{trainer_id}"
     elif node_type == "mlp_neuron":
         if ae_group_name is None:
             ae_group_name = "othello_mlp_acts_identity_aes_lines"  # with_lines
@@ -527,9 +543,9 @@ def get_ae(
         return ae
 
 
-def get_aes(node_type: str, repo_dir: str):
+def get_aes(node_type: str, repo_dir: str, trainer_id: Optional[int] = None):
     aes = []
     for layer in range(8):
-        ae = get_ae(layer, node_type, repo_dir)
+        ae = get_ae(layer, node_type, repo_dir, trainer_id=trainer_id)
         aes.append(ae)
     return aes
