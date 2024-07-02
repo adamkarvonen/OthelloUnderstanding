@@ -6,6 +6,7 @@ wandb/
 **.sh
 **.pkl
 **.png
+**.err
 autoencoders/*
 
 !autoencoders/README.md

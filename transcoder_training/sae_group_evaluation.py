@@ -23,15 +23,15 @@ from circuits.utils import get_single_ae
 
 
 # %%
-transcoder = True
+transcoder = False
 device='cuda:0'
 repo_dir = '/share/u/can/OthelloUnderstanding'
 
 node_type = "sae_feature"
 # node_type = "mlp_neuron"
 
-ae_group_name = 'mlp_transcoder_all_layers_panneal_0628'
-# ae_group_name = 'othello_mlp_acts_identity_aes_lines' # with_lines
+# ae_group_name = 'mlp_transcoder_all_layers_panneal_0628'
+ae_group_name = 'mlp_out_sweep_all_layers_panneal_0628'
 ae_type = 'p_anneal'
 
 # %%
@@ -95,7 +95,7 @@ for layer_idx in ae_group_trainers_per_layer:
     
 
     for trainer_name in tqdm(ae_group_trainers_per_layer[layer_idx]):
-        evaluations['path'].append(trainer_name)
+        evaluations['path'].append(trainer_name[len(repo_dir)+1:])
         evaluations['layer_idx'].append(layer_idx)
         evaluations['trainer_idx'].append(trainer_name.split('iner')[-1]) # TODO change convention to have an underscore before the trainer idx
 
@@ -123,3 +123,4 @@ for layer_idx in ae_group_trainers_per_layer:
 # %%
 df_eval_ae_group = pd.DataFrame(evaluations)
 df_eval_ae_group.to_csv(os.path.join(ae_group_dir, 'evaluations.csv'))
+# %%

@@ -503,7 +503,7 @@ def interventions(
     return logits_clean_BLV, logits_patch_BLV
 
 
-def compute_predictors(
+def compute_predictors_parallel(
     custom_functions: list[Callable],
     num_cores: int,
     layers: list[int],
@@ -516,7 +516,7 @@ def compute_predictors(
     save_results: bool = True,
     max_depth: int = 8,
 ) -> dict:
-
+    
     output_filename = f"decision_trees/decision_trees_{input_location}_{dataset_size}.pkl"
 
     if not force_recompute and os.path.exists(output_filename):
@@ -561,6 +561,63 @@ def compute_predictors(
         #             'decision_tree': layer_result['regular_dt'],
         #             'binary_decision_tree': layer_result['binary_dt']
         #         }
+
+    if save_results:
+        with open(output_filename, "wb") as f:
+            pickle.dump(results, f)
+
+    return results
+
+def compute_predictors_iterative(
+    custom_functions: list[Callable],
+    num_cores: int,
+    layers: list[int],
+    data: dict,
+    neuron_acts: dict,
+    binary_acts: dict,
+    input_location: str,
+    dataset_size: int,
+    force_recompute: bool = False,
+    save_results: bool = True,
+    max_depth: int = 8,
+) -> dict:
+    
+    output_filename = f"decision_trees/decision_trees_{input_location}_{dataset_size}.pkl"
+
+    if not force_recompute and os.path.exists(output_filename):
+        print(f"Loading decision trees from {output_filename}")
+        with open(output_filename, "rb") as f:
+            decision_trees = pickle.load(f)
+        return decision_trees
+
+    # Use all available cores, but max out at num_cores
+    num_cores = min(num_cores, multiprocessing.cpu_count())
+
+    results = {}
+
+    for layer in layers:
+        results[layer] = {}
+
+    for custom_function in custom_functions:
+
+        print(f"\n{custom_function.__name__}")
+        games_input_features = {}
+        games_input_features[0] = data[custom_function.__name__]
+        games_input_features[0] = utils.to_device(games_input_features[0], "cpu")
+
+        for layer in range(8):
+            layer_result = process_layer(layer, games_input_features[layer], neuron_acts, binary_acts, max_depth=max_depth)
+            layer = layer_result['layer']
+            results[layer][custom_function.__name__] = {
+                "decision_tree": layer_result["regular_dt"],
+                'binary_decision_tree': layer_result['binary_dt']
+            }
+
+            rule_neurons_mask = results[layer][str(custom_function.__name__)]['binary_decision_tree']['f1'] > threshold
+            print(f'Layer {layer} Rule Neurons: {rule_neurons_mask.sum()}')
+            rule_neurons = binary_acts[layer][:, :, rule_neurons_mask]
+            if layer < 7:
+                games_input_features[layer + 1] = torch.cat([games_input_features[layer], rule_neurons], dim=-1)
 
     if save_results:
         with open(output_filename, "wb") as f:

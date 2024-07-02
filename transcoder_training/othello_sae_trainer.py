@@ -98,9 +98,10 @@ def run_sae_training(
     else:
         trainer_class = PAnnealTrainer
         io = "out"
-        # submodule = model.blocks[layer].hook_resid_post # resid_post
-        submodule = model.blocks[layer].hook_mlp_out # resid_post
-        # submodule = model.blocks[layer].mlp.hook_post # resid_pre
+        # submodule = model.blocks[layer].hook_resid_post 
+        # submodule = model.blocks[layer].hook_mlp_out
+        submodule = model.blocks[layer].hook_attn_out
+        # submodule = model.blocks[layer].mlp.hook_post # latent activations after non-linearity
 
     activation_buffer = NNsightActivationBuffer(
         data,
