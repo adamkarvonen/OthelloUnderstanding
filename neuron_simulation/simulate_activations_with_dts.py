@@ -122,9 +122,10 @@ def add_probe_outputs_to_data(
 
         with torch.no_grad(), model.trace(encoded_inputs_BL, **tracer_kwargs):
             for layer in range(1, num_layers):
-                model_activations_BLD = model.blocks[layer].hook_resid_post.output.save()
+                probe_layer = layer - 1
+                model_activations_BLD = model.blocks[probe_layer].hook_resid_post.output.save()
 
-                probe_DRRC = probe_dict[layer - 1]
+                probe_DRRC = probe_dict[probe_layer]
 
                 probe_out_BLRRC = einops.einsum(
                     model_activations_BLD,
@@ -870,6 +871,7 @@ def run_simulations(config: sim_config.SimulationConfig):
 
     for custom_function in config.custom_functions:
         if custom_function.__name__ in othello_utils.probe_input_functions:
+            print(f"Adding probe outputs for {custom_function.__name__}")
             train_data = add_probe_outputs_to_data(
                 train_data,
                 model,
