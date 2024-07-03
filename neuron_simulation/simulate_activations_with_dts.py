@@ -870,7 +870,25 @@ def run_simulations(config: sim_config.SimulationConfig):
 
     for custom_function in config.custom_functions:
         if custom_function.__name__ in othello_utils.probe_input_functions:
-            continue
+            train_data = add_probe_outputs_to_data(
+                train_data,
+                model,
+                custom_function,
+                device,
+                8,
+                config.batch_size,
+                config.n_batches,
+            )
+
+            test_data = add_probe_outputs_to_data(
+                test_data,
+                model,
+                custom_function,
+                device,
+                8,
+                config.batch_size,
+                config.n_batches,
+            )
 
     for combination in config.combinations:
 
