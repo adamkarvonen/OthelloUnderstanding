@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 
 import circuits.othello_utils as othello_utils
@@ -29,24 +29,16 @@ sae_mean_config = InterventionCombination(
     add_error=[True],
 )
 
-sae_mlp_out_feature_config = SAE_config
-sae_mlp_out_feature_config.input_location = "sae_mlp_out_feature"
 
-transcoder_config = SAE_config
-transcoder_config.input_location = "transcoder"
+sae_mlp_out_feature_config = replace(SAE_config, input_location="sae_mlp_out_feature")
+transcoder_config = replace(SAE_config, input_location="transcoder")
 
-test_sae_mlp_out_feature_config = sae_mlp_out_feature_config
-test_sae_mlp_out_feature_config.trainer_ids = list(range(5))
-
-test_transcoder_config = test_sae_mlp_out_feature_config
-test_transcoder_config.input_location = "transcoder"
+test_sae_mlp_out_feature_config = replace(sae_mlp_out_feature_config, trainer_ids=list(range(5)))
+test_transcoder_config = replace(test_sae_mlp_out_feature_config, input_location="transcoder")
 
 # The following are hand selected for good L0 / frac recovered tradeoff
-selected_sae_mlp_out_feature_config = sae_mlp_out_feature_config
-selected_sae_mlp_out_feature_config.trainer_ids = [8]
-
-selected_transcoder_config = transcoder_config
-selected_transcoder_config.trainer_ids = [2]
+selected_sae_mlp_out_feature_config = replace(sae_mlp_out_feature_config, trainer_ids=[8])
+selected_transcoder_config = replace(transcoder_config, trainer_ids=[2])
 
 MLP_dt_config = InterventionCombination(
     input_location="mlp_neuron",
