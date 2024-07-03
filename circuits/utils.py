@@ -475,18 +475,17 @@ def get_ae(
     layer: int,
     node_type: str,
     repo_dir: str,
-    ae_group_name: str = None,
+    trainer_id: int,
+    ae_group_name: Optional[str] = None,
     return_ae_group_dir: bool = False,
     device: str = "cpu",
-    trainer_id: Optional[int] = None,
 ):
+    """A default trainer_id is 0 if unsure."""
     if node_type == "sae_feature":
         if ae_group_name is None:
             ae_group_name = "othello_all_layers_p_anneal_0524"
         ae_group_dir = f"{repo_dir}/autoencoders/{ae_group_name}"
         ae_type = "p_anneal"
-        if trainer_id is None:
-            trainer_id = 0
         ae_path = f"{ae_group_dir}/layer_{layer}/trainer{trainer_id}"
     elif node_type == "sae_mlp_feature":
         if ae_group_name is None:
@@ -499,16 +498,12 @@ def get_ae(
             ae_group_name = "mlp_out_sweep_all_layers_panneal_0628"
         ae_group_dir = f"{repo_dir}/autoencoders/{ae_group_name}"
         ae_type = "p_anneal"
-        if trainer_id is None:
-            trainer_id = 8
         ae_path = f"{ae_group_dir}/layer_{layer}/trainer{trainer_id}"
     elif node_type == "transcoder":
         if ae_group_name is None:
             ae_group_name = "mlp_transcoder_all_layers_panneal_0628"
         ae_group_dir = f"{repo_dir}/autoencoders/{ae_group_name}"
         ae_type = "p_anneal"
-        if trainer_id is None:
-            trainer_id = 2
         ae_path = f"{ae_group_dir}/layer_{layer}/trainer{trainer_id}"
     elif node_type == "mlp_neuron":
         if ae_group_name is None:
@@ -543,7 +538,7 @@ def get_ae(
         return ae
 
 
-def get_aes(node_type: str, repo_dir: str, trainer_id: Optional[int] = None):
+def get_aes(node_type: str, repo_dir: str, trainer_id: int):
     aes = []
     for layer in range(8):
         ae = get_ae(layer, node_type, repo_dir, trainer_id=trainer_id)

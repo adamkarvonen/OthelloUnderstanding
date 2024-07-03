@@ -10,7 +10,7 @@ class InterventionCombination:
     ablation_method: str
     ablate_not_selected: list[bool]
     add_error: list[bool]
-    trainer_ids: list[Optional[int]]
+    trainer_ids: list[int]
 
 
 SAE_config = InterventionCombination(
@@ -24,7 +24,7 @@ SAE_config = InterventionCombination(
 sae_mean_config = InterventionCombination(
     input_location="CHANGE_ME",
     ablation_method="mean",
-    trainer_ids=[None],
+    trainer_ids=[0],
     ablate_not_selected=[True],
     add_error=[True],
 )
@@ -35,18 +35,23 @@ sae_mlp_out_feature_config.input_location = "sae_mlp_out_feature"
 transcoder_config = SAE_config
 transcoder_config.input_location = "transcoder"
 
-test_SAE_mlp_out_feature_config = InterventionCombination(
-    input_location="sae_mlp_out_feature",
-    trainer_ids=list(range(5)),
-    ablation_method="dt",
-    ablate_not_selected=[True, False],
-    add_error=[True, False],
-)
+test_sae_mlp_out_feature_config = sae_mlp_out_feature_config
+test_sae_mlp_out_feature_config.trainer_ids = list(range(5))
+
+test_transcoder_config = test_sae_mlp_out_feature_config
+test_transcoder_config.input_location = "transcoder"
+
+# The following are hand selected for good L0 / frac recovered tradeoff
+selected_sae_mlp_out_feature_config = sae_mlp_out_feature_config
+selected_sae_mlp_out_feature_config.trainer_ids = [8]
+
+selected_transcoder_config = transcoder_config
+selected_transcoder_config.trainer_ids = [2]
 
 MLP_dt_config = InterventionCombination(
     input_location="mlp_neuron",
     ablation_method="dt",
-    trainer_ids=[None],
+    trainer_ids=[0],
     ablate_not_selected=[True, False],
     add_error=[True],
 )
@@ -54,7 +59,7 @@ MLP_dt_config = InterventionCombination(
 MLP_mean_config = InterventionCombination(
     input_location="mlp_neuron",
     ablation_method="mean",
-    trainer_ids=[None],
+    trainer_ids=[0],
     ablate_not_selected=[True],
     add_error=[True],
 )
@@ -94,4 +99,17 @@ class SimulationConfig:
 
 
 test_config = SimulationConfig()
-test_config.combinations = [test_SAE_mlp_out_feature_config]
+test_config.combinations = [
+    test_sae_mlp_out_feature_config,
+    test_transcoder_config,
+    MLP_dt_config,
+    MLP_mean_config,
+]
+
+selected_config = SimulationConfig()
+selected_config.combinations = [
+    selected_sae_mlp_out_feature_config,
+    selected_transcoder_config,
+    MLP_dt_config,
+    MLP_mean_config,
+]
