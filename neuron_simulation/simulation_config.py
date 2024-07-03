@@ -64,7 +64,7 @@ MLP_mean_config = InterventionCombination(
 class SimulationConfig:
     repo_dir: str = "/home/adam/OthelloUnderstanding"
     model_name: str = "Baidicoot/Othello-GPT-Transformer-Lens"
-    output_location: str = 
+    output_location: str = "neuron_simulation/"
     batch_size: int = 10
     n_batches: int = 5
     num_layers: int = 8

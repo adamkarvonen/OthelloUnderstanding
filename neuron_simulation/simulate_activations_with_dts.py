@@ -516,9 +516,12 @@ def compute_predictors(
     force_recompute: bool,
     save_results: bool,
     max_depth: int,
+    output_location: str,
 ) -> dict:
 
-    output_filename = f"decision_trees/decision_trees_{input_location}_{dataset_size}.pkl"
+    output_filename = (
+        f"{output_location}decision_trees/decision_trees_{input_location}_{dataset_size}.pkl"
+    )
 
     if not force_recompute and os.path.exists(output_filename):
         print(f"Loading decision trees from {output_filename}")
@@ -785,6 +788,7 @@ def run_simulations(config: sim_config.SimulationConfig):
                 force_recompute=config.force_recompute,
                 save_results=config.save_decision_trees,
                 max_depth=config.max_depth,
+                output_location=config.output_location,
             )
 
             for layer in decision_trees:
@@ -810,7 +814,7 @@ def run_simulations(config: sim_config.SimulationConfig):
                     }
 
             with open(
-                f"decision_trees/results_{input_location}_trainer_{trainer_id}_inputs_{dataset_size}.pkl",
+                f"{config.output_location}decision_trees/results_{input_location}_trainer_{trainer_id}_inputs_{dataset_size}.pkl",
                 "wb",
             ) as f:
                 pickle.dump(results, f)
@@ -838,7 +842,7 @@ def run_simulations(config: sim_config.SimulationConfig):
                 )
 
                 with open(
-                    f"decision_trees/ablation_results_{input_location}_{ablation_method}_ablate_not_selected_{ablate_not_selected}_add_error_{add_error}_trainer_{trainer_id}_inputs_{dataset_size}.pkl",
+                    f"{config.output_location}decision_trees/ablation_results_{input_location}_{ablation_method}_ablate_not_selected_{ablate_not_selected}_add_error_{add_error}_trainer_{trainer_id}_inputs_{dataset_size}.pkl",
                     "wb",
                 ) as f:
                     pickle.dump(ablations, f)
