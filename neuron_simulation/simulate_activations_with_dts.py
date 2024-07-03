@@ -642,7 +642,7 @@ def perform_interventions(
     ablation_method: str,
     ablate_not_selected: bool,
     add_error: bool,
-    custom_function: Callable,
+    custom_functions: list[Callable],
     model,
     intervention_layers: list[list[int]],
     data: dict,
@@ -665,46 +665,54 @@ def perform_interventions(
     else:
         d_model = 512
 
-    for selected_layers in intervention_layers:
+    for custom_function in custom_functions:
 
-        selected_features = {}
+        for selected_layers in intervention_layers:
 
-        for layer in selected_layers:
-            if ablation_method == "zero" or ablation_method == "mean" or ablation_method == "max":
-                selected_features[layer] = torch.ones(d_model, dtype=torch.bool)
-            elif ablation_method == "dt":
-                all_f1s = decision_trees[layer][custom_function.__name__]["decision_tree"]["r2"]
-                good_f1s = all_f1s > threshold
-                selected_features[layer] = good_f1s
-                print(good_f1s.shape, good_f1s.dtype, good_f1s.sum())
-            else:
-                raise ValueError(f"Invalid ablation method: {ablation_method}")
+            selected_features = {}
 
-        logits_clean_BLV, logits_patch_BLV = interventions(
-            model=model,
-            train_data=data,
-            selected_features=selected_features,
-            decision_trees=decision_trees,
-            ae_dict=ae_dict,
-            submodule_dict=submodule_dict,
-            custom_function=custom_function,
-            layers=selected_layers,
-            ablation_method=ablation_method,
-            ablate_not_selected=ablate_not_selected,
-            add_error=add_error,
-            input_location=input_location,
-        )
+            for layer in selected_layers:
+                if (
+                    ablation_method == "zero"
+                    or ablation_method == "mean"
+                    or ablation_method == "max"
+                ):
+                    selected_features[layer] = torch.ones(d_model, dtype=torch.bool)
+                elif ablation_method == "dt":
+                    all_f1s = decision_trees[layer][custom_function.__name__]["decision_tree"]["r2"]
+                    good_f1s = all_f1s > threshold
+                    selected_features[layer] = good_f1s
+                    print(good_f1s.shape, good_f1s.dtype, good_f1s.sum())
+                else:
+                    raise ValueError(f"Invalid ablation method: {ablation_method}")
 
-        kl_div_BL = compute_kl_divergence(logits_clean_BLV, logits_patch_BLV)
-        print(kl_div_BL.mean())
-        ablations["results"][tuple(selected_layers)] = {
-            custom_function.__name__: kl_div_BL.mean().cpu()
-        }
+            logits_clean_BLV, logits_patch_BLV = interventions(
+                model=model,
+                train_data=data,
+                selected_features=selected_features,
+                decision_trees=decision_trees,
+                ae_dict=ae_dict,
+                submodule_dict=submodule_dict,
+                custom_function=custom_function,
+                layers=selected_layers,
+                ablation_method=ablation_method,
+                ablate_not_selected=ablate_not_selected,
+                add_error=add_error,
+                input_location=input_location,
+            )
+
+            kl_div_BL = compute_kl_divergence(logits_clean_BLV, logits_patch_BLV)
+            print(kl_div_BL.mean())
+            layers_key = tuple(selected_layers)
+
+            if layers_key not in ablations["results"]:
+                ablations["results"][layers_key] = {}
+
+            ablations["results"][layers_key][custom_function.__name__] = kl_div_BL.mean().cpu()
 
     hyperparameters["ablation_method"] = ablation_method
     hyperparameters["ablate_not_selected"] = ablate_not_selected
     hyperparameters["add_error"] = add_error
-    hyperparameters["custom_function"] = custom_function.__name__
     hyperparameters["intervention_layers"] = intervention_layers
 
     ablations["hyperparameters"] = hyperparameters
@@ -823,15 +831,13 @@ def run_simulations(config: sim_config.SimulationConfig):
 
                 ablate_not_selected, add_error = combo
 
-                ablation_custom_function = config.custom_functions[0]
-
                 ablations = perform_interventions(
                     decision_trees=decision_trees,
                     input_location=input_location,
                     ablation_method=ablation_method,
                     ablate_not_selected=ablate_not_selected,
                     add_error=add_error,
-                    custom_function=ablation_custom_function,
+                    custom_function=config.custom_functions,
                     model=model,
                     intervention_layers=config.intervention_layers,
                     data=test_data,
@@ -849,9 +855,9 @@ def run_simulations(config: sim_config.SimulationConfig):
 
 
 if __name__ == "__main__":
-    default_config = sim_config.test_config
+    default_config = sim_config.selected_config
 
     # example config change
-    default_config.n_batches = 2
-    default_config.batch_size = 5
+    default_config.n_batches = 5
+    default_config.batch_size = 10
     run_simulations(default_config)
