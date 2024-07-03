@@ -23,6 +23,7 @@ from xgboost import XGBRegressor, XGBClassifier
 import circuits.utils as utils
 import circuits.othello_utils as othello_utils
 from circuits.eval_sae_as_classifier import construct_othello_dataset
+import neuron_inputs.simulation_config as sim_config
 
 # Setup
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -139,7 +140,7 @@ def get_max_activations(neuron_acts: dict, layer: int) -> torch.Tensor:
     return max_activations_D
 
 
-def calculate_binary_activations(neuron_acts: dict, threshold: float = 0.1):
+def calculate_binary_activations(neuron_acts: dict, threshold: float):
     binary_acts = {}
 
     for layer in neuron_acts:
@@ -289,10 +290,10 @@ def process_layer(
     games_BLC: torch.Tensor,
     neuron_acts: dict,
     binary_acts: dict,
+    max_depth: int,
     linear_reg: bool = False,
     regular_dt: bool = True,
     binary_dt: bool = True,
-    max_depth: int = 8,
     random_seed: int = 42,
 ) -> dict:
 
@@ -503,7 +504,7 @@ def interventions(
     return logits_clean_BLV, logits_patch_BLV
 
 
-def compute_predictors_parallel(
+def compute_predictors(
     custom_functions: list[Callable],
     num_cores: int,
     layers: list[int],
@@ -512,11 +513,11 @@ def compute_predictors_parallel(
     binary_acts: dict,
     input_location: str,
     dataset_size: int,
-    force_recompute: bool = False,
-    save_results: bool = True,
-    max_depth: int = 8,
+    force_recompute: bool,
+    save_results: bool,
+    max_depth: int,
 ) -> dict:
-    
+
     output_filename = f"decision_trees/decision_trees_{input_location}_{dataset_size}.pkl"
 
     if not force_recompute and os.path.exists(output_filename):
@@ -565,8 +566,8 @@ def compute_predictors_parallel(
     if save_results:
         with open(output_filename, "wb") as f:
             pickle.dump(results, f)
-
     return results
+
 
 def compute_predictors_iterative(
     custom_functions: list[Callable],
@@ -577,11 +578,11 @@ def compute_predictors_iterative(
     binary_acts: dict,
     input_location: str,
     dataset_size: int,
-    force_recompute: bool = False,
-    save_results: bool = True,
-    max_depth: int = 8,
+    force_recompute: bool,
+    save_results: bool,
+    max_depth: int,
 ) -> dict:
-    
+
     output_filename = f"decision_trees/decision_trees_{input_location}_{dataset_size}.pkl"
 
     if not force_recompute and os.path.exists(output_filename):
@@ -606,18 +607,25 @@ def compute_predictors_iterative(
         games_input_features[0] = utils.to_device(games_input_features[0], "cpu")
 
         for layer in range(8):
-            layer_result = process_layer(layer, games_input_features[layer], neuron_acts, binary_acts, max_depth=max_depth)
-            layer = layer_result['layer']
+            layer_result = process_layer(
+                layer, games_input_features[layer], neuron_acts, binary_acts, max_depth=max_depth
+            )
+            layer = layer_result["layer"]
             results[layer][custom_function.__name__] = {
                 "decision_tree": layer_result["regular_dt"],
-                'binary_decision_tree': layer_result['binary_dt']
+                "binary_decision_tree": layer_result["binary_dt"],
             }
 
-            rule_neurons_mask = results[layer][str(custom_function.__name__)]['binary_decision_tree']['f1'] > threshold
-            print(f'Layer {layer} Rule Neurons: {rule_neurons_mask.sum()}')
+            rule_neurons_mask = (
+                results[layer][str(custom_function.__name__)]["binary_decision_tree"]["f1"]
+                > threshold
+            )
+            print(f"Layer {layer} Rule Neurons: {rule_neurons_mask.sum()}")
             rule_neurons = binary_acts[layer][:, :, rule_neurons_mask]
             if layer < 7:
-                games_input_features[layer + 1] = torch.cat([games_input_features[layer], rule_neurons], dim=-1)
+                games_input_features[layer + 1] = torch.cat(
+                    [games_input_features[layer], rule_neurons], dim=-1
+                )
 
     if save_results:
         with open(output_filename, "wb") as f:
@@ -702,168 +710,142 @@ def perform_interventions(
     return ablations
 
 
-repo_dir = "/home/adam/OthelloUnderstanding"
-model_name = "Baidicoot/Othello-GPT-Transformer-Lens"
-batch_size = 10
-n_batches = 2
-dataset_size = batch_size * n_batches
-num_layers = 8
-layers = list(range(num_layers))
-threshold = 0.7
-max_depth = 8
-num_cores = 8
+def run_simulations(config: sim_config.SimulationConfig):
 
-intervention_layers = []
+    add_output_folders()
 
-for i in range(num_layers):
-    intervention_layers.append([i])
+    dataset_size = config.n_batches * config.batch_size
 
+    model, train_data = load_model_and_data(
+        config.model_name, dataset_size, config.custom_functions
+    )
+    test_data = construct_othello_dataset(
+        custom_functions=config.custom_functions,
+        n_inputs=dataset_size,
+        split="test",
+        device=device,
+    )
 
-add_output_folders()
+    for combination in config.combinations:
 
-custom_functions = [
-    othello_utils.games_batch_to_input_tokens_flipped_bs_valid_moves_classifier_input_BLC,
-    # othello_utils.games_batch_to_input_tokens_classifier_input_BLC,
-    # othello_utils.games_batch_to_board_state_and_input_tokens_classifier_input_BLC,
-    # othello_utils.games_batch_to_input_tokens_flipped_classifier_input_BLC,
-    # othello_utils.games_batch_to_board_state_classifier_input_BLC,
-    # othello_utils.games_batch_to_input_tokens_parity_classifier_input_BLC,
-]
+        input_location = combination.input_location
+        trainer_ids = combination.trainer_ids
+        ablation_method = combination.ablation_method
+        ablate_not_selected = combination.ablate_not_selected
+        add_error = combination.add_error
 
-true_false_combinations = list(itertools.product([True, False], repeat=2))
+        true_false_combinations = list(itertools.product(ablate_not_selected, add_error))
 
-combinations = [
-    # ("sae_mlp_out_feature", "max"),
-    # ("sae_mlp_out_feature", "dt"),
-    # ("transcoder", "dt"),
-    # ("transcoder", "mean"),
-    # ("mlp_neuron", "mean"),
-    ("sae_mlp_out_feature", "mean"),
-    # ("mlp_neuron", "dt"),
-]
+        for trainer_id in trainer_ids:
 
-model, train_data = load_model_and_data(model_name, dataset_size, custom_functions)
-test_data = construct_othello_dataset(
-    custom_functions=custom_functions,
-    n_inputs=dataset_size,
-    split="test",
-    device=device,
-)
-
-for combination in combinations:
-
-    input_location, ablation_method = combination
-
-    if input_location == "mlp_neuron" or ablation_method == "mean" or ablation_method == "max":
-        trainer_ids = [None]
-    else:
-        trainer_ids = list(range(21))
-
-    for trainer_id in trainer_ids:
-
-        ae_dict = utils.get_aes(node_type=input_location, repo_dir=repo_dir, trainer_id=trainer_id)
-        submodule_dict = get_submodule_dict(model, model_name, layers, input_location)
-
-        neuron_acts = cache_sae_activations(
-            model,
-            train_data,
-            layers,
-            batch_size,
-            n_batches,
-            input_location,
-            ae_dict,
-            submodule_dict,
-        )
-
-        binary_acts = calculate_binary_activations(neuron_acts)
-
-        neuron_acts = utils.to_device(neuron_acts, "cpu")
-        binary_acts = utils.to_device(binary_acts, "cpu")
-
-        results = {
-            "hyperparameters": {
-                "input_location": input_location,
-                "trainer_id": trainer_id,
-                "dataset_size": dataset_size,
-            }
-        }
-
-        decision_trees = compute_predictors(
-            custom_functions=custom_functions,
-            num_cores=num_cores,
-            layers=layers,
-            data=train_data,
-            neuron_acts=neuron_acts,
-            binary_acts=binary_acts,
-            input_location=input_location,
-            dataset_size=dataset_size,
-            force_recompute=False,
-            save_results=False,
-            max_depth=max_depth,
-        )
-
-        for layer in decision_trees:
-            results[layer] = {}
-            for custom_function in custom_functions:
-                results[layer][custom_function.__name__] = {
-                    "decision_tree": {
-                        "mse": decision_trees[layer][custom_function.__name__]["decision_tree"][
-                            "mse"
-                        ],
-                        "r2": decision_trees[layer][custom_function.__name__]["decision_tree"][
-                            "r2"
-                        ],
-                    },
-                    "binary_decision_tree": {
-                        "f1": decision_trees[layer][custom_function.__name__][
-                            "binary_decision_tree"
-                        ]["f1"],
-                        "accuracy": decision_trees[layer][custom_function.__name__][
-                            "binary_decision_tree"
-                        ]["accuracy"],
-                    },
-                }
-
-        with open(
-            f"decision_trees/results_{input_location}_trainer_{trainer_id}_inputs_{dataset_size}.pkl",
-            "wb",
-        ) as f:
-            pickle.dump(results, f)
-
-        for combo in true_false_combinations:
-
-            ablate_not_selected, add_error = combo
-
-            if (ablation_method == "mean" or ablation_method == "max") and (
-                ablate_not_selected != False or add_error != False
-            ):
-                continue
-
-            if input_location == "mlp_neuron" and ablation_method != "mean" and add_error == False:
-                continue
-
-            ablation_custom_function = custom_functions[0]
-
-            ablations = perform_interventions(
-                decision_trees=decision_trees,
-                input_location=input_location,
-                ablation_method=ablation_method,
-                ablate_not_selected=ablate_not_selected,
-                add_error=add_error,
-                custom_function=ablation_custom_function,
-                model=model,
-                intervention_layers=intervention_layers,
-                data=test_data,
-                threshold=threshold,
-                ae_dict=ae_dict,
-                submodule_dict=submodule_dict,
+            ae_dict = utils.get_aes(
+                node_type=input_location, repo_dir=config.repo_dir, trainer_id=trainer_id
+            )
+            submodule_dict = get_submodule_dict(
+                model, config.model_name, config.layers, input_location
             )
 
-            ablations["hyperparameters"]["trainer_id"] = trainer_id
-            ablations["hyperparameters"]["dataset_size"] = dataset_size
+            neuron_acts = cache_sae_activations(
+                model,
+                train_data,
+                config.layers,
+                config.batch_size,
+                config.n_batches,
+                input_location,
+                ae_dict,
+                submodule_dict,
+            )
+
+            binary_acts = calculate_binary_activations(neuron_acts, config.binary_threshold)
+
+            neuron_acts = utils.to_device(neuron_acts, "cpu")
+            binary_acts = utils.to_device(binary_acts, "cpu")
+
+            results = {
+                "hyperparameters": {
+                    "input_location": input_location,
+                    "trainer_id": trainer_id,
+                    "dataset_size": dataset_size,
+                }
+            }
+
+            decision_trees = compute_predictors(
+                custom_functions=config.custom_functions,
+                num_cores=config.num_cores,
+                layers=config.layers,
+                data=train_data,
+                neuron_acts=neuron_acts,
+                binary_acts=binary_acts,
+                input_location=input_location,
+                dataset_size=dataset_size,
+                force_recompute=config.force_recompute,
+                save_results=config.save_decision_trees,
+                max_depth=config.max_depth,
+            )
+
+            for layer in decision_trees:
+                results[layer] = {}
+                for custom_function in config.custom_functions:
+                    results[layer][custom_function.__name__] = {
+                        "decision_tree": {
+                            "mse": decision_trees[layer][custom_function.__name__]["decision_tree"][
+                                "mse"
+                            ],
+                            "r2": decision_trees[layer][custom_function.__name__]["decision_tree"][
+                                "r2"
+                            ],
+                        },
+                        "binary_decision_tree": {
+                            "f1": decision_trees[layer][custom_function.__name__][
+                                "binary_decision_tree"
+                            ]["f1"],
+                            "accuracy": decision_trees[layer][custom_function.__name__][
+                                "binary_decision_tree"
+                            ]["accuracy"],
+                        },
+                    }
 
             with open(
-                f"decision_trees/ablation_results_{input_location}_{ablation_method}_ablate_not_selected_{ablate_not_selected}_add_error_{add_error}_trainer_{trainer_id}_inputs_{dataset_size}.pkl",
+                f"decision_trees/results_{input_location}_trainer_{trainer_id}_inputs_{dataset_size}.pkl",
                 "wb",
             ) as f:
-                pickle.dump(ablations, f)
+                pickle.dump(results, f)
+
+            for combo in true_false_combinations:
+
+                ablate_not_selected, add_error = combo
+
+                ablation_custom_function = config.custom_functions[0]
+
+                ablations = perform_interventions(
+                    decision_trees=decision_trees,
+                    input_location=input_location,
+                    ablation_method=ablation_method,
+                    ablate_not_selected=ablate_not_selected,
+                    add_error=add_error,
+                    custom_function=ablation_custom_function,
+                    model=model,
+                    intervention_layers=config.intervention_layers,
+                    data=test_data,
+                    threshold=config.intervention_threshold,
+                    ae_dict=ae_dict,
+                    submodule_dict=submodule_dict,
+                )
+
+                ablations["hyperparameters"]["trainer_id"] = trainer_id
+                ablations["hyperparameters"]["dataset_size"] = dataset_size
+
+                with open(
+                    f"decision_trees/ablation_results_{input_location}_{ablation_method}_ablate_not_selected_{ablate_not_selected}_add_error_{add_error}_trainer_{trainer_id}_inputs_{dataset_size}.pkl",
+                    "wb",
+                ) as f:
+                    pickle.dump(ablations, f)
+
+
+if __name__ == "__main__":
+    default_config = sim_config.SimulationConfig()
+
+    # example config change
+    default_config.n_batches = 2
+
+    run_simulations(default_config)
