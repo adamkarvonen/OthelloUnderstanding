@@ -19,7 +19,7 @@ import pickle
 import itertools
 from importlib import resources
 
-from xgboost import XGBRegressor, XGBClassifier
+# from xgboost import XGBRegressor, XGBClassifier
 
 import circuits.utils as utils
 import circuits.othello_utils as othello_utils
