@@ -837,7 +837,7 @@ def run_simulations(config: sim_config.SimulationConfig):
                     ablation_method=ablation_method,
                     ablate_not_selected=ablate_not_selected,
                     add_error=add_error,
-                    custom_function=config.custom_functions,
+                    custom_functions=config.custom_functions,
                     model=model,
                     intervention_layers=config.intervention_layers,
                     data=test_data,
