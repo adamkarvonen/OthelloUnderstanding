@@ -132,8 +132,8 @@ def add_probe_outputs_to_data(
                     probe_DRRC,
                     "B L D, D R1 R2 C -> B L R1 R2 C",
                 )
-
-                probe_out_BLRRC = probe_out_BLRRC.log_softmax(dim=-1)
+                # Not using floating point inputs for now
+                # probe_out_BLRRC = probe_out_BLRRC.log_softmax(dim=-1)
 
                 if layer not in probe_outputs:
                     probe_outputs[layer] = []
@@ -141,20 +141,25 @@ def add_probe_outputs_to_data(
                 probe_outputs[layer].append(probe_out_BLRRC.save())
     for layer in range(1, num_layers):
         probe_outputs[layer] = torch.stack(probe_outputs[layer], dim=0)
-        probe_outputs[layer] = einops.rearrange(
-            probe_outputs[layer], "N B L R1 R2 C -> (N B) L (R1 R2 C)"
-        )
-        probe_outputs_BLC = probe_outputs[layer]
+        probe_out_BLRRC = einops.rearrange(probe_outputs[layer], "N B L R1 R2 C -> (N B) L R1 R2 C")
+
+        num_classes = probe_out_BLRRC.shape[-1]
+
+        # Floating point inputs could be very useful, but they are extremely slow
+        # For decision tree training, so we just use argmax and one hot for now
+        # We do the one hot conversion here due to nnsight issues during the LM forward pass
+        probe_out_BLRR = torch.argmax(probe_out_BLRRC, dim=-1)
+        probe_out_BLRRC = torch.nn.functional.one_hot(probe_out_BLRR, num_classes=num_classes)
+
+        probe_outputs_BLC = einops.rearrange(probe_out_BLRRC, "B L R1 R2 C -> B L (R1 R2 C)")
 
         games_BLC = data[layer][func_name].clone()
 
         B, L, C1 = probe_outputs_BLC.shape
         C2 = games_BLC.shape[-1]
+        C3 = C1 + C2
 
         games_and_probes_BLC = torch.cat([games_BLC, probe_outputs_BLC], dim=-1)
-
-        C3 = games_and_probes_BLC.shape[-1]
-
         assert games_and_probes_BLC.shape == (B, L, C3)
 
         data[layer][func_name] = games_and_probes_BLC
