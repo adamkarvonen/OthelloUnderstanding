@@ -17,6 +17,7 @@ from typing import Callable, Optional
 import os
 import pickle
 import itertools
+from importlib import resources
 
 from xgboost import XGBRegressor, XGBClassifier
 
@@ -33,15 +34,131 @@ tracer_kwargs = {"validate": False, "scan": False}
 tracer_kwargs = {"validate": True, "scan": True}
 
 
-def load_model_and_data(model_name: str, dataset_size: int, custom_functions: list[Callable]):
-    model = utils.get_model(model_name, device)
+def construct_dataset_per_layer(
+    custom_functions: list[Callable],
+    dataset_size: int,
+    split: str,
+    device: str,
+    layers: list[int],
+) -> dict:
+    """NOTE: By default we use .clone() on tensors, which will increase memory usage with number of layers.
+    At current dataset sizes this is not a problem, but keep in mind for larger datasets."""
     data = construct_othello_dataset(
         custom_functions=custom_functions,
         n_inputs=dataset_size,
-        split="train",
+        split=split,
         device=device,
     )
+
+    all_data = {}
+
+    all_data["encoded_inputs"] = data["encoded_inputs"]
+    all_data["decoded_inputs"] = data["decoded_inputs"]
+
+    for layer in layers:
+
+        if layer not in all_data:
+            all_data[layer] = {}
+
+        for custom_function in custom_functions:
+            func_name = custom_function.__name__
+            if func_name not in all_data[layer]:
+                all_data[layer][func_name] = {}
+
+            all_data[layer][func_name] = data[func_name].clone()
+
+    return all_data
+
+
+def load_model_and_data(
+    model_name: str, dataset_size: int, custom_functions: list[Callable], device: str
+):
+    model = utils.get_model(model_name, device)
+    data = construct_dataset_per_layer(
+        custom_functions, dataset_size, "train", device, list(range(8))
+    )
+
     return model, data
+
+
+def load_probe_dict(device: str, num_layers: int) -> dict:
+    probe_dict = {}
+    for layer in range(num_layers):
+        linear_probe_name = (
+            f"Othello-GPT-Transformer-Lens_othello_mine_yours_probe_layer_{layer}.pth"
+        )
+        linear_probe_path = resources.files("linear_probes") / linear_probe_name
+        checkpoint = torch.load(linear_probe_path, map_location=device)
+        linear_probe_MDRRC = checkpoint["linear_probe"]
+        linear_probe_DRRC = linear_probe_MDRRC[0]
+        probe_dict[layer] = linear_probe_DRRC
+
+    return probe_dict
+
+
+def add_probe_outputs_to_data(
+    data: dict,
+    model,
+    custom_function: Callable,
+    device: str,
+    num_layers: int,
+    batch_size: int,
+    n_batches: int,
+) -> dict:
+    """NOTE: Layer 0 will have nothing, layer 1 will have probe outputs for layer 0, etc."""
+
+    probe_dict = load_probe_dict(device, num_layers)
+
+    encoded_inputs_bL = data["encoded_inputs"]
+    encoded_inputs_bL = torch.tensor(encoded_inputs_bL, device=device)
+    func_name = custom_function.__name__
+
+    probe_outputs = {}
+
+    for batch_idx in range(n_batches):
+        batch_start = batch_idx * batch_size
+        batch_end = (batch_idx + 1) * batch_size
+        encoded_inputs_BL = encoded_inputs_bL[batch_start:batch_end]
+
+        with torch.no_grad(), model.trace(encoded_inputs_BL, **tracer_kwargs):
+            for layer in range(1, num_layers):
+                model_activations_BLD = model.blocks[layer].hook_resid_post.output.save()
+
+                probe_DRRC = probe_dict[layer - 1]
+
+                probe_out_BLRRC = einops.einsum(
+                    model_activations_BLD,
+                    probe_DRRC,
+                    "B L D, D R1 R2 C -> B L R1 R2 C",
+                )
+
+                probe_out_BLRRC = probe_out_BLRRC.log_softmax(dim=-1)
+
+                if layer not in probe_outputs:
+                    probe_outputs[layer] = []
+
+                probe_outputs[layer].append(probe_out_BLRRC.save())
+    for layer in range(1, num_layers):
+        probe_outputs[layer] = torch.stack(probe_outputs[layer], dim=0)
+        probe_outputs[layer] = einops.rearrange(
+            probe_outputs[layer], "N B L R1 R2 C -> (N B) L (R1 R2 C)"
+        )
+        probe_outputs_BLC = probe_outputs[layer]
+
+        games_BLC = data[layer][func_name].clone()
+
+        B, L, C1 = probe_outputs_BLC.shape
+        C2 = games_BLC.shape[-1]
+
+        games_and_probes_BLC = torch.cat([games_BLC, probe_outputs_BLC], dim=-1)
+
+        C3 = games_and_probes_BLC.shape[-1]
+
+        assert games_and_probes_BLC.shape == (B, L, C3)
+
+        data[layer][func_name] = games_and_probes_BLC
+
+    return data
 
 
 def cache_neuron_activations(
@@ -287,7 +404,8 @@ def add_output_folders():
 
 def process_layer(
     layer: int,
-    games_BLC: torch.Tensor,
+    data: dict,
+    func_name: str,
     neuron_acts: dict,
     binary_acts: dict,
     max_depth: int,
@@ -298,6 +416,9 @@ def process_layer(
 ) -> dict:
 
     print(f"\nLayer {layer}")
+
+    games_BLC = data[layer][func_name]
+    games_BLC = utils.to_device(games_BLC, "cpu")
 
     if regular_dt:
         X_train, X_test, y_train, y_test = prepare_data(games_BLC, neuron_acts[layer])
@@ -418,11 +539,13 @@ def interventions(
     max_activations = {}
 
     if ablation_method == "dt":
-        board_state_BLC = train_data[custom_function.__name__]
-        B, L, C = board_state_BLC.shape
-        X = einops.rearrange(board_state_BLC, "b l c -> (b l) c").cpu().numpy()
 
         for layer in layers:
+
+            board_state_BLC = train_data[layer][custom_function.__name__]
+            B, L, C = board_state_BLC.shape
+            X = einops.rearrange(board_state_BLC, "b l c -> (b l) c").cpu().numpy()
+
             decision_tree = decision_trees[layer][custom_function.__name__]["decision_tree"][
                 "model"
             ]
@@ -538,13 +661,14 @@ def compute_predictors(
         results[layer] = {}
 
     for custom_function in custom_functions:
+        func_name = custom_function.__name__
 
-        print(f"\n{custom_function.__name__}")
-        games_BLC = data[custom_function.__name__]
-        games_BLC = utils.to_device(games_BLC, "cpu")
+        print(f"\n{func_name}")
 
         layer_results = Parallel(n_jobs=num_cores)(
-            delayed(process_layer)(layer, games_BLC, neuron_acts, binary_acts, max_depth=max_depth)
+            delayed(process_layer)(
+                layer, data, func_name, neuron_acts, binary_acts, max_depth=max_depth
+            )
             for layer in layers
         )
 
@@ -734,14 +858,19 @@ def run_simulations(config: sim_config.SimulationConfig):
     }
 
     model, train_data = load_model_and_data(
-        config.model_name, dataset_size, config.custom_functions
+        config.model_name, dataset_size, config.custom_functions, device
     )
-    test_data = construct_othello_dataset(
+    test_data = construct_dataset_per_layer(
         custom_functions=config.custom_functions,
-        n_inputs=dataset_size,
+        dataset_size=dataset_size,
         split="test",
         device=device,
+        layers=list(range(8)),
     )
+
+    for custom_function in config.custom_functions:
+        if custom_function.__name__ in othello_utils.probe_input_functions:
+            continue
 
     for combination in config.combinations:
 
@@ -856,8 +985,14 @@ def run_simulations(config: sim_config.SimulationConfig):
 
 if __name__ == "__main__":
     default_config = sim_config.selected_config
+    # default_config = sim_config.test_config
+
+    default_config.custom_functions = [
+        othello_utils.games_batch_to_input_tokens_flipped_bs_valid_moves_probe_classifier_input_BLC,
+        othello_utils.games_batch_to_input_tokens_flipped_bs_valid_moves_classifier_input_BLC,
+    ]
 
     # example config change
-    default_config.n_batches = 5
-    default_config.batch_size = 10
+    default_config.n_batches = 2
+    # default_config.batch_size = 10
     run_simulations(default_config)
