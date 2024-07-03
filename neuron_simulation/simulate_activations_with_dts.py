@@ -23,7 +23,7 @@ from xgboost import XGBRegressor, XGBClassifier
 import circuits.utils as utils
 import circuits.othello_utils as othello_utils
 from circuits.eval_sae_as_classifier import construct_othello_dataset
-import neuron_inputs.simulation_config as sim_config
+import neuron_simulation.simulation_config as sim_config
 
 # Setup
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
