@@ -646,9 +646,10 @@ def perform_interventions(
     threshold: float,
     ae_dict: dict,
     submodule_dict: dict,
+    hyperparameters: dict,
 ):
 
-    ablations = {}
+    ablations = {"results": {}}
 
     if input_location == "mlp_neuron":
         d_model = 2048
@@ -661,7 +662,6 @@ def perform_interventions(
     else:
         d_model = 512
 
-    effect_per_layer = []
     for selected_layers in intervention_layers:
 
         selected_features = {}
@@ -694,18 +694,17 @@ def perform_interventions(
 
         kl_div_BL = compute_kl_divergence(logits_clean_BLV, logits_patch_BLV)
         print(kl_div_BL.mean())
-        effect_per_layer.append(kl_div_BL.mean().cpu())
+        ablations["results"][tuple(selected_layers)] = {
+            custom_function.__name__: kl_div_BL.mean().cpu()
+        }
 
-    ablations["ablations"] = effect_per_layer
-    ablations["hyperparameters"] = {
-        "input_location": input_location,
-        "ablation_method": ablation_method,
-        "ablate_not_selected": ablate_not_selected,
-        "add_error": add_error,
-        "threshold": threshold,
-        "custom_function": custom_function.__name__,
-        "intervention_layers": intervention_layers,
-    }
+    hyperparameters["ablation_method"] = ablation_method
+    hyperparameters["ablate_not_selected"] = ablate_not_selected
+    hyperparameters["add_error"] = add_error
+    hyperparameters["custom_function"] = custom_function.__name__
+    hyperparameters["intervention_layers"] = intervention_layers
+
+    ablations["hyperparameters"] = hyperparameters
 
     return ablations
 
@@ -715,6 +714,13 @@ def run_simulations(config: sim_config.SimulationConfig):
     add_output_folders()
 
     dataset_size = config.n_batches * config.batch_size
+
+    hyperparameters = {
+        "dataset_size": dataset_size,
+        "intervention_threshold": config.intervention_threshold,
+        "max_depth": config.max_depth,
+        "binary_threshold": config.binary_threshold,
+    }
 
     model, train_data = load_model_and_data(
         config.model_name, dataset_size, config.custom_functions
@@ -761,13 +767,11 @@ def run_simulations(config: sim_config.SimulationConfig):
             neuron_acts = utils.to_device(neuron_acts, "cpu")
             binary_acts = utils.to_device(binary_acts, "cpu")
 
-            results = {
-                "hyperparameters": {
-                    "input_location": input_location,
-                    "trainer_id": trainer_id,
-                    "dataset_size": dataset_size,
-                }
-            }
+            individual_hyperparameters = hyperparameters.copy()
+            individual_hyperparameters["trainer_id"] = trainer_id
+            individual_hyperparameters["input_location"] = input_location
+
+            results = {"hyperparameters": individual_hyperparameters, "results": {}}
 
             decision_trees = compute_predictors(
                 custom_functions=config.custom_functions,
@@ -784,9 +788,9 @@ def run_simulations(config: sim_config.SimulationConfig):
             )
 
             for layer in decision_trees:
-                results[layer] = {}
+                results["results"][layer] = {}
                 for custom_function in config.custom_functions:
-                    results[layer][custom_function.__name__] = {
+                    results["results"][layer][custom_function.__name__] = {
                         "decision_tree": {
                             "mse": decision_trees[layer][custom_function.__name__]["decision_tree"][
                                 "mse"
@@ -830,10 +834,8 @@ def run_simulations(config: sim_config.SimulationConfig):
                     threshold=config.intervention_threshold,
                     ae_dict=ae_dict,
                     submodule_dict=submodule_dict,
+                    hyperparameters=individual_hyperparameters.copy(),
                 )
-
-                ablations["hyperparameters"]["trainer_id"] = trainer_id
-                ablations["hyperparameters"]["dataset_size"] = dataset_size
 
                 with open(
                     f"decision_trees/ablation_results_{input_location}_{ablation_method}_ablate_not_selected_{ablate_not_selected}_add_error_{add_error}_trainer_{trainer_id}_inputs_{dataset_size}.pkl",
@@ -843,9 +845,9 @@ def run_simulations(config: sim_config.SimulationConfig):
 
 
 if __name__ == "__main__":
-    default_config = sim_config.SimulationConfig()
+    default_config = sim_config.test_config
 
     # example config change
     default_config.n_batches = 2
-
+    default_config.batch_size = 5
     run_simulations(default_config)

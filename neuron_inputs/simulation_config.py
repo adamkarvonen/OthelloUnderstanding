@@ -21,7 +21,7 @@ SAE_config = InterventionCombination(
     add_error=[True, False],
 )
 
-SAE_mean_config = InterventionCombination(
+sae_mean_config = InterventionCombination(
     input_location="CHANGE_ME",
     ablation_method="mean",
     trainer_ids=[None],
@@ -29,11 +29,19 @@ SAE_mean_config = InterventionCombination(
     add_error=[True],
 )
 
-SAE_mlp_out_feature_config = SAE_config
-SAE_mlp_out_feature_config.input_location = "SAE_mlp_out_feature"
+sae_mlp_out_feature_config = SAE_config
+sae_mlp_out_feature_config.input_location = "sae_mlp_out_feature"
 
 transcoder_config = SAE_config
 transcoder_config.input_location = "transcoder"
+
+test_SAE_mlp_out_feature_config = InterventionCombination(
+    input_location="sae_mlp_out_feature",
+    trainer_ids=list(range(5)),
+    ablation_method="dt",
+    ablate_not_selected=[True, False],
+    add_error=[True, False],
+)
 
 MLP_dt_config = InterventionCombination(
     input_location="mlp_neuron",
@@ -81,4 +89,8 @@ class SimulationConfig:
         # othello_utils.games_batch_to_input_tokens_parity_classifier_input_BLC,
     ]
 
-    combinations = [SAE_mlp_out_feature_config, transcoder_config, MLP_dt_config, MLP_mean_config]
+    combinations = [sae_mlp_out_feature_config, transcoder_config, MLP_dt_config, MLP_mean_config]
+
+
+test_config = SimulationConfig()
+test_config.combinations = [test_SAE_mlp_out_feature_config]
