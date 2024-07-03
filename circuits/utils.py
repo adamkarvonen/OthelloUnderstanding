@@ -484,51 +484,51 @@ def get_ae(
     if node_type == "sae_feature":
         if ae_group_name is None:
             ae_group_name = "othello_all_layers_p_anneal_0524"
-        ae_group_dir = f"{repo_dir}/autoencoders/{ae_group_name}"
+        ae_group_dir = f"{repo_dir}autoencoders/{ae_group_name}"
         ae_type = "p_anneal"
         ae_path = f"{ae_group_dir}/layer_{layer}/trainer{trainer_id}"
     elif node_type == "sae_mlp_feature":
         if ae_group_name is None:
             ae_group_name = "othello_all_mlps_p_anneal_0531"
-        ae_group_dir = f"{repo_dir}/autoencoders/{ae_group_name}"
+        ae_group_dir = f"{repo_dir}autoencoders/{ae_group_name}"
         ae_type = "p_anneal"
         ae_path = f"{ae_group_dir}/layer_{layer}"
     elif node_type == "sae_mlp_out_feature":
         if ae_group_name is None:
             ae_group_name = "mlp_out_sweep_all_layers_panneal_0628"
-        ae_group_dir = f"{repo_dir}/autoencoders/{ae_group_name}"
+        ae_group_dir = f"{repo_dir}autoencoders/{ae_group_name}"
         ae_type = "p_anneal"
         ae_path = f"{ae_group_dir}/layer_{layer}/trainer{trainer_id}"
     elif node_type == "transcoder":
         if ae_group_name is None:
             ae_group_name = "mlp_transcoder_all_layers_panneal_0628"
-        ae_group_dir = f"{repo_dir}/autoencoders/{ae_group_name}"
+        ae_group_dir = f"{repo_dir}autoencoders/{ae_group_name}"
         ae_type = "p_anneal"
         ae_path = f"{ae_group_dir}/layer_{layer}/trainer{trainer_id}"
     elif node_type == "mlp_neuron":
         if ae_group_name is None:
             ae_group_name = "othello_mlp_acts_identity_aes_lines"  # with_lines
-        ae_group_dir = f"{repo_dir}/autoencoders/{ae_group_name}"
+        ae_group_dir = f"{repo_dir}autoencoders/{ae_group_name}"
         ae_type = "identity"
         ae_path = f"{ae_group_dir}/layer_{layer}"
     elif node_type == "attention_out" or node_type == "mlp_out":
         if ae_group_name is None:
             ae_group_name = "othello_resid_acts_identity_aes"
-        ae_group_dir = f"{repo_dir}/autoencoders/{ae_group_name}"
+        ae_group_dir = f"{repo_dir}autoencoders/{ae_group_name}"
         ae_type = "identity"
         ae_path = f"{ae_group_dir}/layer_{layer}"
     else:
         raise ValueError("Invalid node_type")
 
     # download data from huggingface if needed
-    if not os.path.exists(f"{repo_dir}/autoencoders/{ae_group_name}"):
+    if not os.path.exists(f"{repo_dir}autoencoders/{ae_group_name}"):
         hf_hub_download(
             repo_id="adamkarvonen/othello_saes",
             filename=f"{ae_group_name}.zip",
-            local_dir=f"{repo_dir}/autoencoders",
+            local_dir=f"{repo_dir}autoencoders",
         )
         # unzip the data
-        os.system(f"unzip {repo_dir}/autoencoders/{ae_group_name}.zip -d {repo_dir}/autoencoders")
+        os.system(f"unzip {repo_dir}autoencoders/{ae_group_name}.zip -d {repo_dir}autoencoders")
 
     ae = get_single_ae(ae_path, ae_type, device)
 

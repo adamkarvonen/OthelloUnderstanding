@@ -33,7 +33,7 @@ sae_mean_config = InterventionCombination(
 sae_mlp_out_feature_config = replace(SAE_config, input_location="sae_mlp_out_feature")
 transcoder_config = replace(SAE_config, input_location="transcoder")
 
-test_sae_mlp_out_feature_config = replace(sae_mlp_out_feature_config, trainer_ids=list(range(5)))
+test_sae_mlp_out_feature_config = replace(sae_mlp_out_feature_config, trainer_ids=list(range(10)))
 test_transcoder_config = replace(test_sae_mlp_out_feature_config, input_location="transcoder")
 
 # The following are hand selected for good L0 / frac recovered tradeoff
@@ -59,7 +59,7 @@ MLP_mean_config = InterventionCombination(
 
 @dataclass
 class SimulationConfig:
-    repo_dir: str = "/home/adam/OthelloUnderstanding"
+    repo_dir: str = ""
     model_name: str = "Baidicoot/Othello-GPT-Transformer-Lens"
     output_location: str = "neuron_simulation/"
     batch_size: int = 10
