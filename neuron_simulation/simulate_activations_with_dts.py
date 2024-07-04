@@ -81,12 +81,25 @@ def load_model_and_data(
     return model, data
 
 
-def load_probe_dict(device: str, num_layers: int) -> dict:
+def load_probe_dict(device: str, num_layers: int, custom_function: Callable) -> dict:
     probe_dict = {}
     for layer in range(num_layers):
-        linear_probe_name = (
-            f"Othello-GPT-Transformer-Lens_othello_mine_yours_probe_layer_{layer}.pth"
-        )
+        if (
+            custom_function
+            == othello_utils.games_batch_to_input_tokens_flipped_bs_valid_moves_bs_probe_classifier_input_BLC
+        ):
+            linear_probe_name = (
+                f"Othello-GPT-Transformer-Lens_othello_mine_yours_probe_layer_{layer}.pth"
+            )
+        # elif (
+        #     custom_function
+        #     == othello_utils.games_batch_to_input_tokens_flipped_bs_valid_moves_bs_probe_classifier_input_BLC
+        # ):
+        #     linear_probe_name = (
+        #         f"Othello-GPT-Transformer-Lens_othello_valid_moves_probe_layer_{layer}.pth"
+        #     )
+        else:
+            raise ValueError(f"Invalid custom function: {custom_function}")
         linear_probe_path = resources.files("linear_probes") / linear_probe_name
         checkpoint = torch.load(linear_probe_path, map_location=device)
         linear_probe_MDRRC = checkpoint["linear_probe"]
@@ -107,7 +120,7 @@ def add_probe_outputs_to_data(
 ) -> dict:
     """NOTE: Layer 0 will have nothing, layer 1 will have probe outputs for layer 0, etc."""
 
-    probe_dict = load_probe_dict(device, num_layers)
+    probe_dict = load_probe_dict(device, num_layers, custom_function)
 
     encoded_inputs_bL = data["encoded_inputs"]
     encoded_inputs_bL = torch.tensor(encoded_inputs_bL, device=device)
