@@ -948,48 +948,51 @@ def run_simulations(config: sim_config.SimulationConfig):
 
             results = {"hyperparameters": individual_hyperparameters, "results": {}}
 
-            decision_trees = compute_predictors(
-                custom_functions=config.custom_functions,
-                num_cores=config.num_cores,
-                layers=config.layers,
-                data=train_data,
-                neuron_acts=neuron_acts,
-                binary_acts=binary_acts,
-                input_location=input_location,
-                dataset_size=dataset_size,
-                force_recompute=config.force_recompute,
-                save_results=config.save_decision_trees,
-                max_depth=config.max_depth,
-                output_location=config.output_location,
-            )
+            if ablation_method == "dt":
+                decision_trees = compute_predictors(
+                    custom_functions=config.custom_functions,
+                    num_cores=config.num_cores,
+                    layers=config.layers,
+                    data=train_data,
+                    neuron_acts=neuron_acts,
+                    binary_acts=binary_acts,
+                    input_location=input_location,
+                    dataset_size=dataset_size,
+                    force_recompute=config.force_recompute,
+                    save_results=config.save_decision_trees,
+                    max_depth=config.max_depth,
+                    output_location=config.output_location,
+                )
 
-            for layer in decision_trees:
-                results["results"][layer] = {}
-                for custom_function in config.custom_functions:
-                    results["results"][layer][custom_function.__name__] = {
-                        "decision_tree": {
-                            "mse": decision_trees[layer][custom_function.__name__]["decision_tree"][
-                                "mse"
-                            ],
-                            "r2": decision_trees[layer][custom_function.__name__]["decision_tree"][
-                                "r2"
-                            ],
-                        },
-                        "binary_decision_tree": {
-                            "f1": decision_trees[layer][custom_function.__name__][
-                                "binary_decision_tree"
-                            ]["f1"],
-                            "accuracy": decision_trees[layer][custom_function.__name__][
-                                "binary_decision_tree"
-                            ]["accuracy"],
-                        },
-                    }
+                for layer in decision_trees:
+                    results["results"][layer] = {}
+                    for custom_function in config.custom_functions:
+                        results["results"][layer][custom_function.__name__] = {
+                            "decision_tree": {
+                                "mse": decision_trees[layer][custom_function.__name__][
+                                    "decision_tree"
+                                ]["mse"],
+                                "r2": decision_trees[layer][custom_function.__name__][
+                                    "decision_tree"
+                                ]["r2"],
+                            },
+                            "binary_decision_tree": {
+                                "f1": decision_trees[layer][custom_function.__name__][
+                                    "binary_decision_tree"
+                                ]["f1"],
+                                "accuracy": decision_trees[layer][custom_function.__name__][
+                                    "binary_decision_tree"
+                                ]["accuracy"],
+                            },
+                        }
 
-            with open(
-                f"{config.output_location}decision_trees/results_{input_location}_trainer_{trainer_id}_inputs_{dataset_size}.pkl",
-                "wb",
-            ) as f:
-                pickle.dump(results, f)
+                with open(
+                    f"{config.output_location}decision_trees/results_{input_location}_trainer_{trainer_id}_inputs_{dataset_size}.pkl",
+                    "wb",
+                ) as f:
+                    pickle.dump(results, f)
+            else:
+                decision_trees = None
 
             for combo in true_false_combinations:
 
