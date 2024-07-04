@@ -71,14 +71,19 @@ def construct_dataset_per_layer(
 
 
 def load_model_and_data(
-    model_name: str, dataset_size: int, custom_functions: list[Callable], device: str
+    model_name: str,
+    dataset_size: int,
+    custom_functions: list[Callable],
+    device: str,
+    layers: list[int],
 ):
     model = utils.get_model(model_name, device)
-    data = construct_dataset_per_layer(
-        custom_functions, dataset_size, "train", device, list(range(8))
+    train_data = construct_dataset_per_layer(
+        custom_functions, dataset_size, "train", device, layers
     )
+    test_data = construct_dataset_per_layer(custom_functions, dataset_size, "test", device, layers)
 
-    return model, data
+    return model, train_data, test_data
 
 
 def load_probe_dict(device: str, num_layers: int, custom_function: Callable) -> dict:
@@ -895,15 +900,8 @@ def run_simulations(config: sim_config.SimulationConfig):
         "binary_threshold": config.binary_threshold,
     }
 
-    model, train_data = load_model_and_data(
-        config.model_name, dataset_size, config.custom_functions, device
-    )
-    test_data = construct_dataset_per_layer(
-        custom_functions=config.custom_functions,
-        dataset_size=dataset_size,
-        split="test",
-        device=device,
-        layers=list(range(8)),
+    model, train_data, test_data = load_model_and_data(
+        config.model_name, dataset_size, config.custom_functions, device, list(range(8))
     )
 
     for custom_function in config.custom_functions:
