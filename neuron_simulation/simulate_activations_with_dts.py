@@ -958,6 +958,28 @@ def perform_interventions(
     return ablations
 
 
+def update_results_dict(output_file: str, results: dict):
+    if os.path.exists(output_file):
+        # If it exists, load the existing results
+        with open(output_file, "rb") as f:
+            existing_results = pickle.load(f)
+
+        # Update the existing results with new data
+        for layer in results["results"]:
+            if layer not in existing_results["results"]:
+                existing_results["results"][layer] = {}
+            for func_name in results["results"][layer]:
+                if func_name not in existing_results["results"][layer]:
+                    existing_results["results"][layer][func_name] = results["results"][layer][
+                        func_name
+                    ]
+
+        results = existing_results
+    # Write the results (either new or updated) to the file
+    with open(output_file, "wb") as f:
+        pickle.dump(results, f)
+
+
 def run_simulations(config: sim_config.SimulationConfig):
 
     add_output_folders()
@@ -1078,11 +1100,9 @@ def run_simulations(config: sim_config.SimulationConfig):
                             },
                         }
 
-                with open(
-                    f"{config.output_location}decision_trees/results_{input_location}_trainer_{trainer_id}_inputs_{dataset_size}.pkl",
-                    "wb",
-                ) as f:
-                    pickle.dump(results, f)
+                results_filename = f"{config.output_location}decision_trees/results_{input_location}_trainer_{trainer_id}_inputs_{dataset_size}.pkl"
+                update_results_dict(results_filename, results)
+
             else:
                 decision_trees = None
 
@@ -1106,11 +1126,8 @@ def run_simulations(config: sim_config.SimulationConfig):
                     hyperparameters=individual_hyperparameters.copy(),
                 )
 
-                with open(
-                    f"{config.output_location}decision_trees/ablation_results_{input_location}_{ablation_method}_ablate_not_selected_{ablate_not_selected}_add_error_{add_error}_trainer_{trainer_id}_inputs_{dataset_size}.pkl",
-                    "wb",
-                ) as f:
-                    pickle.dump(ablations, f)
+                ablation_filename = f"{config.output_location}decision_trees/ablation_results_{input_location}_{ablation_method}_ablate_not_selected_{ablate_not_selected}_add_error_{add_error}_trainer_{trainer_id}_inputs_{dataset_size}.pkl"
+                update_results_dict(ablation_filename, ablations)
 
 
 if __name__ == "__main__":
@@ -1118,11 +1135,11 @@ if __name__ == "__main__":
     # default_config = sim_config.test_config
 
     default_config.custom_functions = [
-        othello_utils.games_batch_to_input_tokens_flipped_bs_valid_moves_bs_probe_classifier_input_BLC,
-        othello_utils.games_batch_to_input_tokens_flipped_bs_valid_moves_classifier_input_BLC,
+        # othello_utils.games_batch_to_input_tokens_flipped_bs_valid_moves_bs_probe_classifier_input_BLC,
+        # othello_utils.games_batch_to_input_tokens_flipped_bs_valid_moves_classifier_input_BLC,
         # othello_utils.games_batch_to_input_tokens_flipped_classifier_input_BLC,
         # othello_utils.games_batch_to_previous_board_state_classifier_input_BLC,
-        othello_utils.games_batch_to_board_state_classifier_input_BLC,
+        # othello_utils.games_batch_to_board_state_classifier_input_BLC,
         othello_utils.games_batch_to_input_tokens_flipped_classifier_input_BLC,
         # othello_utils.games_batch_to_probe_classifier_input_BLC,
     ]
@@ -1135,6 +1152,6 @@ if __name__ == "__main__":
     # ]
 
     # example config change
-    default_config.n_batches = 9
+    default_config.n_batches = 1
     # default_config.batch_size = 10
     run_simulations(default_config)
