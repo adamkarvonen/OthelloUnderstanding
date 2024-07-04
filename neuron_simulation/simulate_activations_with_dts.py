@@ -404,8 +404,18 @@ def compute_kl_divergence(logits_clean_BLV, logits_patch_BLV):
 
 
 def add_output_folders():
-    os.makedirs("decision_trees", exist_ok=True)
-    os.makedirs("images", exist_ok=True)
+    # Get the current working directory
+    current_dir = os.getcwd()
+
+    # Check if we're already in the neuron_simulation directory
+    if os.path.basename(current_dir) == "neuron_simulation":
+        base_path = ""
+    else:
+        base_path = "neuron_simulation"
+
+    # Create the directories
+    os.makedirs(os.path.join(base_path, "decision_trees"), exist_ok=True)
+    os.makedirs(os.path.join(base_path, "images"), exist_ok=True)
 
 
 def process_layer(
@@ -1018,6 +1028,6 @@ if __name__ == "__main__":
     ]
 
     # example config change
-    default_config.n_batches = 2
+    default_config.n_batches = 4
     # default_config.batch_size = 10
     run_simulations(default_config)
