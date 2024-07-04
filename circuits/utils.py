@@ -507,7 +507,8 @@ def get_ae(
         ae_path = f"{ae_group_dir}/layer_{layer}/trainer{trainer_id}"
     elif node_type == "mlp_neuron":
         if ae_group_name is None:
-            ae_group_name = "othello_mlp_acts_identity_aes_lines"  # with_lines
+            # append _lines to ae_group_name to get lines data results
+            ae_group_name = "othello_mlp_acts_identity_aes"
         ae_group_dir = f"{repo_dir}autoencoders/{ae_group_name}"
         ae_type = "identity"
         ae_path = f"{ae_group_dir}/layer_{layer}"
