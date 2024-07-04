@@ -100,6 +100,31 @@ def games_batch_to_state_stack_mine_yours_BLRRC(batch_str_moves: list[int]) -> t
     return t.stack(game_stack, axis=0)
 
 
+def games_batch_to_state_stack_previous_board_mine_yours_BLRRC(
+    batch_str_moves: list[int],
+) -> t.Tensor:
+    """Sequences of moves (dataset format) to state stack (one-hot) of shape (seq_len, 8, 8, 3)"""
+    iterable = tqdm(batch_str_moves) if len(batch_str_moves) > 50 else batch_str_moves
+
+    game_stack = []
+    for game in iterable:
+        if isinstance(game, t.Tensor):
+            game = game.flatten()
+
+        board = OthelloBoardState()
+        states = []
+        for i, move in enumerate(game):
+            flip = 1
+            if i % 2 == 1:
+                flip = -1
+            one_hot = board_state_to_RRC(board.state, flip)
+            states.append(one_hot)
+            board.umpire(move)
+        states = t.stack(states, axis=0)
+        game_stack.append(states)
+    return t.stack(game_stack, axis=0)
+
+
 def games_batch_to_state_stack_mine_yours_blank_mask_BLRRC(batch_str_moves: list[int]) -> t.Tensor:
     """Sequences of moves (dataset format) to state stack (one-hot) of shape (seq_len, 8, 8, 3)"""
     iterable = tqdm(batch_str_moves) if len(batch_str_moves) > 50 else batch_str_moves
@@ -384,6 +409,14 @@ def games_batch_to_board_state_classifier_input_BLC(
     return board_state_BLC
 
 
+def games_batch_to_previous_board_state_classifier_input_BLC(
+    batch_str_moves: list[list[int]],
+) -> t.Tensor:
+    board_state_BLRRC = games_batch_to_state_stack_previous_board_mine_yours_BLRRC(batch_str_moves)
+    board_state_BLC = einops.rearrange(board_state_BLRRC, "B L R1 R2 C -> B L (R1 R2 C)")
+    return board_state_BLC
+
+
 def games_batch_to_board_state_and_input_tokens_classifier_input_BLC(
     batch_str_moves: list[list[int]],
 ) -> t.Tensor:
@@ -417,6 +450,14 @@ def games_batch_to_input_tokens_flipped_bs_valid_moves_probe_classifier_input_BL
     batch_str_moves: list[list[int]],
 ) -> t.Tensor:
     return games_batch_to_input_tokens_flipped_bs_valid_moves_classifier_input_BLC(batch_str_moves)
+
+
+def games_batch_to_probe_classifier_input_BLC(
+    batch_str_moves: list[list[int]],
+) -> t.Tensor:
+    B = len(batch_str_moves)
+    L = len(batch_str_moves[0])
+    return t.zeros((B, L, 1), dtype=DEFAULT_DTYPE)
 
 
 def games_batch_to_state_stack_length_lines_mine_BLRRC(
@@ -503,5 +544,6 @@ othello_functions = [
 ]
 
 probe_input_functions = [
-    games_batch_to_input_tokens_flipped_bs_valid_moves_probe_classifier_input_BLC.__name__
+    games_batch_to_input_tokens_flipped_bs_valid_moves_probe_classifier_input_BLC.__name__,
+    games_batch_to_probe_classifier_input_BLC.__name__,
 ]
