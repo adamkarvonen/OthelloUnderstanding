@@ -15,7 +15,7 @@ autoencoders/*
 !autoencoders/gen_identity_ae_folders.ipynb
 !autoencoders/download_saes.sh
 !autoencoders/chess_mlp_acts_identity_aes/
-# !autoencoders/othello_mlp_acts_identity_aes/ # Commented out as this folder includes full_pipeline evals now
+!autoencoders/othello_mlp_acts_identity_aes/
 
 !autoencoders/saved_data/
 
@@ -34,12 +34,6 @@ autoencoders/testing_chess/*
 autoencoders/testing_chess/trainer4/*
 !autoencoders/testing_chess/trainer4/ae.pt
 !autoencoders/testing_chess/trainer4/config.json
-
-
-models/*
-!models/meta.pkl
-
-data.pkl
 
 .*.swp
 .*.swo
