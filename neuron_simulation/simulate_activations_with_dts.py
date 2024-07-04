@@ -438,9 +438,9 @@ def process_layer(
     neuron_acts: dict,
     binary_acts: dict,
     max_depth: int,
+    binary_dt: bool,
     linear_reg: bool = False,
     regular_dt: bool = True,
-    binary_dt: bool = True,
     random_seed: int = 42,
 ) -> dict:
 
@@ -448,6 +448,8 @@ def process_layer(
 
     games_BLC = data[layer][func_name]
     games_BLC = utils.to_device(games_BLC, "cpu")
+
+    layer_results = {"layer": layer}
 
     if regular_dt:
         X_train, X_test, y_train, y_test = prepare_data(games_BLC, neuron_acts[layer])
@@ -467,6 +469,9 @@ def process_layer(
         )
 
         dt_mse, dt_r2 = calculate_neuron_metrics(dt_model, X_test, y_test)
+        layer_results["regular_dt"] = {"model": dt_model, "mse": dt_mse, "r2": dt_r2}
+    else:
+        layer_results["regular_dt"] = {"mse": None, "r2": None}
 
     if binary_dt:
         # Binary Decision Tree
@@ -484,18 +489,15 @@ def process_layer(
         accuracy, precision, recall, f1 = calculate_binary_metrics(
             dt_binary_model, X_binary_test, y_binary_test
         )
-
-    layer_results = {
-        "layer": layer,
-        "regular_dt": {"model": dt_model, "mse": dt_mse, "r2": dt_r2},
-        "binary_dt": {
+        layer_results["binary_dt"] = {
             "model": dt_binary_model,
             "accuracy": accuracy,
             "precision": precision,
             "recall": recall,
             "f1": f1,
-        },
-    }
+        }
+    else:
+        layer_results["binary_dt"] = {"accuracy": None, "f1": None}
 
     if linear_reg:
         lasso_model, lasso_mse, lasso_r2 = train_and_evaluate(
@@ -669,6 +671,7 @@ def compute_predictors(
     save_results: bool,
     max_depth: int,
     output_location: str,
+    binary_dt: bool,
 ) -> dict:
 
     output_filename = (
@@ -696,7 +699,13 @@ def compute_predictors(
 
         layer_results = Parallel(n_jobs=num_cores)(
             delayed(process_layer)(
-                layer, data, func_name, neuron_acts, binary_acts, max_depth=max_depth
+                layer,
+                data,
+                func_name,
+                neuron_acts,
+                binary_acts,
+                max_depth,
+                binary_dt,
             )
             for layer in layers
         )
@@ -975,6 +984,7 @@ def run_simulations(config: sim_config.SimulationConfig):
                     save_results=config.save_decision_trees,
                     max_depth=config.max_depth,
                     output_location=config.output_location,
+                    binary_dt=config.binary_dt,
                 )
 
                 for layer in decision_trees:
@@ -1039,9 +1049,21 @@ if __name__ == "__main__":
     # default_config = sim_config.test_config
 
     default_config.custom_functions = [
-        othello_utils.games_batch_to_input_tokens_flipped_bs_valid_moves_probe_classifier_input_BLC,
-        othello_utils.games_batch_to_input_tokens_flipped_bs_valid_moves_classifier_input_BLC,
+        othello_utils.games_batch_to_input_tokens_flipped_bs_valid_moves_bs_probe_classifier_input_BLC,
+        # othello_utils.games_batch_to_input_tokens_flipped_bs_valid_moves_classifier_input_BLC,
+        # othello_utils.games_batch_to_input_tokens_flipped_classifier_input_BLC,
+        # othello_utils.games_batch_to_previous_board_state_classifier_input_BLC,
+        # othello_utils.games_batch_to_board_state_classifier_input_BLC,
+        # othello_utils.games_batch_to_input_tokens_flipped_classifier_input_BLC,
+        # othello_utils.games_batch_to_probe_classifier_input_BLC,
     ]
+
+    # default_config.combinations = [
+    #     sim_config.selected_sae_mlp_out_feature_config,
+    #     sim_config.selected_transcoder_config,
+    #     sim_config.MLP_dt_config,
+    #     sim_config.MLP_mean_config,
+    # ]
 
     # example config change
     default_config.n_batches = 4

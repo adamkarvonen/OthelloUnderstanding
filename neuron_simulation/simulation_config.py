@@ -72,6 +72,7 @@ class SimulationConfig:
     force_recompute: bool = False
     save_decision_trees: bool = False
     binary_threshold: float = 0.1
+    binary_dt: bool = False
 
     intervention_layers = []
 
