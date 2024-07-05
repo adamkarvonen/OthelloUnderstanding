@@ -452,6 +452,18 @@ def games_batch_to_input_tokens_flipped_bs_valid_moves_probe_classifier_input_BL
     return games_batch_to_input_tokens_flipped_bs_valid_moves_classifier_input_BLC(batch_str_moves)
 
 
+def games_batch_to_input_tokens_flipped_bs_valid_moves_bs_probe_classifier_input_BLC(
+    batch_str_moves: list[list[int]],
+) -> t.Tensor:
+    return games_batch_to_input_tokens_flipped_bs_valid_moves_classifier_input_BLC(batch_str_moves)
+
+
+def games_batch_to_input_tokens_flipped_bs_valid_moves_vm_probe_classifier_input_BLC(
+    batch_str_moves: list[list[int]],
+) -> t.Tensor:
+    return games_batch_to_input_tokens_flipped_bs_valid_moves_classifier_input_BLC(batch_str_moves)
+
+
 def games_batch_to_probe_classifier_input_BLC(
     batch_str_moves: list[list[int]],
 ) -> t.Tensor:
@@ -545,5 +557,7 @@ othello_functions = [
 
 probe_input_functions = [
     games_batch_to_input_tokens_flipped_bs_valid_moves_probe_classifier_input_BLC.__name__,
+    games_batch_to_input_tokens_flipped_bs_valid_moves_bs_probe_classifier_input_BLC.__name__,
+    games_batch_to_input_tokens_flipped_bs_valid_moves_vm_probe_classifier_input_BLC.__name__,
     games_batch_to_probe_classifier_input_BLC.__name__,
 ]
