@@ -404,7 +404,7 @@ def games_batch_to_input_tokens_flipped_classifier_input_BLC(
 def games_batch_to_board_state_classifier_input_BLC(
     batch_str_moves: list[list[int]],
 ) -> t.Tensor:
-    board_state_BLRRC = games_batch_to_state_stack_BLRRC(batch_str_moves)
+    board_state_BLRRC = games_batch_to_state_stack_mine_yours_BLRRC(batch_str_moves)
     board_state_BLC = einops.rearrange(board_state_BLRRC, "B L R1 R2 C -> B L (R1 R2 C)")
     return board_state_BLC
 
