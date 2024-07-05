@@ -43,6 +43,7 @@ def construct_dataset_per_layer(
 ) -> dict:
     """NOTE: By default we use .clone() on tensors, which will increase memory usage with number of layers.
     At current dataset sizes this is not a problem, but keep in mind for larger datasets."""
+    custom_functions.append(othello_utils.games_batch_to_valid_moves_BLRRC)
     data = construct_othello_dataset(
         custom_functions=custom_functions,
         n_inputs=dataset_size,
@@ -54,6 +55,7 @@ def construct_dataset_per_layer(
 
     all_data["encoded_inputs"] = data["encoded_inputs"]
     all_data["decoded_inputs"] = data["decoded_inputs"]
+    all_data["valid_moves"] = data[othello_utils.games_batch_to_valid_moves_BLRRC.__name__].clone()
 
     for layer in layers:
 
@@ -61,32 +63,54 @@ def construct_dataset_per_layer(
             all_data[layer] = {}
 
         for custom_function in custom_functions:
+            if custom_function == othello_utils.games_batch_to_valid_moves_BLRRC:
+                continue
             func_name = custom_function.__name__
             if func_name not in all_data[layer]:
                 all_data[layer][func_name] = {}
 
             all_data[layer][func_name] = data[func_name].clone()
 
+    custom_functions.pop()
+
     return all_data
 
 
 def load_model_and_data(
-    model_name: str, dataset_size: int, custom_functions: list[Callable], device: str
+    model_name: str,
+    dataset_size: int,
+    custom_functions: list[Callable],
+    device: str,
+    layers: list[int],
 ):
     model = utils.get_model(model_name, device)
-    data = construct_dataset_per_layer(
-        custom_functions, dataset_size, "train", device, list(range(8))
+    train_data = construct_dataset_per_layer(
+        custom_functions, dataset_size, "train", device, layers
     )
+    test_data = construct_dataset_per_layer(custom_functions, dataset_size, "test", device, layers)
 
-    return model, data
+    return model, train_data, test_data
 
 
-def load_probe_dict(device: str, num_layers: int) -> dict:
+def load_probe_dict(device: str, num_layers: int, custom_function: Callable) -> dict:
     probe_dict = {}
     for layer in range(num_layers):
-        linear_probe_name = (
-            f"Othello-GPT-Transformer-Lens_othello_mine_yours_probe_layer_{layer}.pth"
-        )
+        if (
+            custom_function
+            == othello_utils.games_batch_to_input_tokens_flipped_bs_valid_moves_bs_probe_classifier_input_BLC
+        ):
+            linear_probe_name = (
+                f"Othello-GPT-Transformer-Lens_othello_mine_yours_probe_layer_{layer}.pth"
+            )
+        # elif (
+        #     custom_function
+        #     == othello_utils.games_batch_to_input_tokens_flipped_bs_valid_moves_bs_probe_classifier_input_BLC
+        # ):
+        #     linear_probe_name = (
+        #         f"Othello-GPT-Transformer-Lens_othello_valid_moves_probe_layer_{layer}.pth"
+        #     )
+        else:
+            raise ValueError(f"Invalid custom function: {custom_function}")
         linear_probe_path = resources.files("linear_probes") / linear_probe_name
         checkpoint = torch.load(linear_probe_path, map_location=device)
         linear_probe_MDRRC = checkpoint["linear_probe"]
@@ -107,7 +131,7 @@ def add_probe_outputs_to_data(
 ) -> dict:
     """NOTE: Layer 0 will have nothing, layer 1 will have probe outputs for layer 0, etc."""
 
-    probe_dict = load_probe_dict(device, num_layers)
+    probe_dict = load_probe_dict(device, num_layers, custom_function)
 
     encoded_inputs_bL = data["encoded_inputs"]
     encoded_inputs_bL = torch.tensor(encoded_inputs_bL, device=device)
@@ -403,6 +427,45 @@ def compute_kl_divergence(logits_clean_BLV, logits_patch_BLV):
     return kl_div_BL
 
 
+def compute_top_n_accuracy(
+    logits_BLV: torch.Tensor, valid_moves_BLRRC: torch.Tensor
+) -> tuple[float, float, float]:
+    valid_moves_BLC = einops.rearrange(valid_moves_BLRRC, "b l r1 r2 c -> b l (r1 r2 c)")
+    n_BL = einops.reduce(valid_moves_BLC, "B L C -> B L", "sum")
+
+    # Get the shape of the logits tensor
+    B, L, V = logits_BLV.shape
+
+    # Create a mask for the top n logits
+    top_n_mask = torch.zeros_like(logits_BLV, dtype=torch.bool)
+
+    for b in range(B):
+        for l in range(L):
+            n = n_BL[b, l].int()
+            _, top_n_indices = torch.topk(logits_BLV[b, l], k=n)
+            top_n_mask[b, l, top_n_indices] = True
+
+    top_n_mask = top_n_mask.int()
+    stoi_top_n_mask = torch.zeros(B, L, (V + 4), dtype=torch.int32)
+
+    # This is so cursed. OthelloGPT has D vocab 61 (ignoring center squares, with pass at idx 0)
+    stoi_top_n_mask[:, :, :28] = top_n_mask[:, :, :28]
+    stoi_top_n_mask[:, :, 30:36] = top_n_mask[:, :, 28:34]
+    stoi_top_n_mask[:, :, 38:] = top_n_mask[:, :, 34:]
+
+    pass_BL1 = torch.zeros(B, L, 1, dtype=torch.int32)
+
+    valid_moves_with_pass_BLC = torch.cat([pass_BL1, valid_moves_BLC], dim=-1)
+
+    correct_BLC = valid_moves_with_pass_BLC * stoi_top_n_mask
+
+    correct = correct_BLC.sum()
+    total = valid_moves_with_pass_BLC.sum()
+    accuracy = correct / total
+
+    return correct, total, accuracy
+
+
 def add_output_folders():
     # Get the current working directory
     current_dir = os.getcwd()
@@ -425,9 +488,9 @@ def process_layer(
     neuron_acts: dict,
     binary_acts: dict,
     max_depth: int,
+    binary_dt: bool,
     linear_reg: bool = False,
     regular_dt: bool = True,
-    binary_dt: bool = True,
     random_seed: int = 42,
 ) -> dict:
 
@@ -435,6 +498,8 @@ def process_layer(
 
     games_BLC = data[layer][func_name]
     games_BLC = utils.to_device(games_BLC, "cpu")
+
+    layer_results = {"layer": layer}
 
     if regular_dt:
         X_train, X_test, y_train, y_test = prepare_data(games_BLC, neuron_acts[layer])
@@ -454,6 +519,9 @@ def process_layer(
         )
 
         dt_mse, dt_r2 = calculate_neuron_metrics(dt_model, X_test, y_test)
+        layer_results["regular_dt"] = {"model": dt_model, "mse": dt_mse, "r2": dt_r2}
+    else:
+        layer_results["regular_dt"] = {"mse": None, "r2": None}
 
     if binary_dt:
         # Binary Decision Tree
@@ -471,18 +539,15 @@ def process_layer(
         accuracy, precision, recall, f1 = calculate_binary_metrics(
             dt_binary_model, X_binary_test, y_binary_test
         )
-
-    layer_results = {
-        "layer": layer,
-        "regular_dt": {"model": dt_model, "mse": dt_mse, "r2": dt_r2},
-        "binary_dt": {
+        layer_results["binary_dt"] = {
             "model": dt_binary_model,
             "accuracy": accuracy,
             "precision": precision,
             "recall": recall,
             "f1": f1,
-        },
-    }
+        }
+    else:
+        layer_results["binary_dt"] = {"accuracy": None, "f1": None}
 
     if linear_reg:
         lasso_model, lasso_mse, lasso_r2 = train_and_evaluate(
@@ -656,6 +721,7 @@ def compute_predictors(
     save_results: bool,
     max_depth: int,
     output_location: str,
+    binary_dt: bool,
 ) -> dict:
 
     output_filename = (
@@ -683,7 +749,13 @@ def compute_predictors(
 
         layer_results = Parallel(n_jobs=num_cores)(
             delayed(process_layer)(
-                layer, data, func_name, neuron_acts, binary_acts, max_depth=max_depth
+                layer,
+                data,
+                func_name,
+                neuron_acts,
+                binary_acts,
+                max_depth,
+                binary_dt,
             )
             for layer in layers
         )
@@ -873,13 +945,39 @@ def perform_interventions(
             )
 
             kl_div_BL = compute_kl_divergence(logits_clean_BLV, logits_patch_BLV)
+
+            clean_correct, clean_total, clean_accuracy = compute_top_n_accuracy(
+                logits_clean_BLV, data["valid_moves"]
+            )
+
+            patch_correct, patch_total, patch_accuracy = compute_top_n_accuracy(
+                logits_patch_BLV, data["valid_moves"]
+            )
+
             print(kl_div_BL.mean())
+            print(clean_accuracy)
+            print(patch_accuracy)
+
+            assert clean_total == patch_total
+
             layers_key = tuple(selected_layers)
 
             if layers_key not in ablations["results"]:
                 ablations["results"][layers_key] = {}
+            if custom_function.__name__ not in ablations["results"][layers_key]:
+                ablations["results"][layers_key][custom_function.__name__] = {}
 
-            ablations["results"][layers_key][custom_function.__name__] = kl_div_BL.mean().cpu()
+            ablations["results"][layers_key][custom_function.__name__][
+                "kl"
+            ] = kl_div_BL.mean().cpu()
+
+            ablations["results"][layers_key][custom_function.__name__][
+                "clean_accuracy"
+            ] = clean_accuracy
+
+            ablations["results"][layers_key][custom_function.__name__][
+                "patch_accuracy"
+            ] = patch_accuracy
 
     hyperparameters["ablation_method"] = ablation_method
     hyperparameters["ablate_not_selected"] = ablate_not_selected
@@ -889,6 +987,28 @@ def perform_interventions(
     ablations["hyperparameters"] = hyperparameters
 
     return ablations
+
+
+def update_results_dict(output_file: str, results: dict):
+    if os.path.exists(output_file):
+        # If it exists, load the existing results
+        with open(output_file, "rb") as f:
+            existing_results = pickle.load(f)
+
+        # Update the existing results with new data
+        for layer in results["results"]:
+            if layer not in existing_results["results"]:
+                existing_results["results"][layer] = {}
+            for func_name in results["results"][layer]:
+                if func_name not in existing_results["results"][layer]:
+                    existing_results["results"][layer][func_name] = results["results"][layer][
+                        func_name
+                    ]
+
+        results = existing_results
+    # Write the results (either new or updated) to the file
+    with open(output_file, "wb") as f:
+        pickle.dump(results, f)
 
 
 def run_simulations(config: sim_config.SimulationConfig):
@@ -904,15 +1024,8 @@ def run_simulations(config: sim_config.SimulationConfig):
         "binary_threshold": config.binary_threshold,
     }
 
-    model, train_data = load_model_and_data(
-        config.model_name, dataset_size, config.custom_functions, device
-    )
-    test_data = construct_dataset_per_layer(
-        custom_functions=config.custom_functions,
-        dataset_size=dataset_size,
-        split="test",
-        device=device,
-        layers=list(range(8)),
+    model, train_data, test_data = load_model_and_data(
+        config.model_name, dataset_size, config.custom_functions, device, list(range(8))
     )
 
     for custom_function in config.custom_functions:
@@ -994,7 +1107,8 @@ def run_simulations(config: sim_config.SimulationConfig):
                         save_results=config.save_decision_trees,
                         max_depth=config.max_depth,
                         output_location=config.output_location,
-                    )
+                        binary_dt=config.binary_dt,
+                )
                 else: # Adds neuron activations as input features to decision trees for downstream layers
                     decision_trees = compute_predictors_iterative(
                         custom_functions=config.custom_functions,
@@ -1042,11 +1156,9 @@ def run_simulations(config: sim_config.SimulationConfig):
                             },
                         }
 
-                with open(
-                    f"{config.output_location}decision_trees/results_{input_location}_trainer_{trainer_id}_inputs_{dataset_size}.pkl",
-                    "wb",
-                ) as f:
-                    pickle.dump(results, f)
+                results_filename = f"{config.output_location}decision_trees/results_{input_location}_trainer_{trainer_id}_inputs_{dataset_size}.pkl"
+                update_results_dict(results_filename, results)
+
             else:
                 decision_trees = None
 
@@ -1070,11 +1182,8 @@ def run_simulations(config: sim_config.SimulationConfig):
                     hyperparameters=individual_hyperparameters.copy(),
                 )
 
-                with open(
-                    f"{config.output_location}decision_trees/ablation_results_{input_location}_{ablation_method}_ablate_not_selected_{ablate_not_selected}_add_error_{add_error}_trainer_{trainer_id}_inputs_{dataset_size}.pkl",
-                    "wb",
-                ) as f:
-                    pickle.dump(ablations, f)
+                ablation_filename = f"{config.output_location}decision_trees/ablation_results_{input_location}_{ablation_method}_ablate_not_selected_{ablate_not_selected}_add_error_{add_error}_trainer_{trainer_id}_inputs_{dataset_size}.pkl"
+                update_results_dict(ablation_filename, ablations)
 
 
 if __name__ == "__main__":
@@ -1082,11 +1191,23 @@ if __name__ == "__main__":
     # default_config = sim_config.test_config
 
     default_config.custom_functions = [
-        othello_utils.games_batch_to_input_tokens_flipped_bs_valid_moves_probe_classifier_input_BLC,
-        othello_utils.games_batch_to_input_tokens_flipped_bs_valid_moves_classifier_input_BLC,
+        # othello_utils.games_batch_to_input_tokens_flipped_bs_valid_moves_bs_probe_classifier_input_BLC,
+        # othello_utils.games_batch_to_input_tokens_flipped_bs_valid_moves_classifier_input_BLC,
+        # othello_utils.games_batch_to_input_tokens_flipped_classifier_input_BLC,
+        # othello_utils.games_batch_to_previous_board_state_classifier_input_BLC,
+        # othello_utils.games_batch_to_board_state_classifier_input_BLC,
+        othello_utils.games_batch_to_input_tokens_flipped_classifier_input_BLC,
+        # othello_utils.games_batch_to_probe_classifier_input_BLC,
     ]
 
+    # default_config.combinations = [
+    #     sim_config.selected_sae_mlp_out_feature_config,
+    #     sim_config.selected_transcoder_config,
+    #     sim_config.MLP_dt_config,
+    #     sim_config.MLP_mean_config,
+    # ]
+
     # example config change
-    default_config.n_batches = 4
+    default_config.n_batches = 1
     # default_config.batch_size = 10
     run_simulations(default_config)

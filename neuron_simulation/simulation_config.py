@@ -73,6 +73,7 @@ class SimulationConfig:
     save_decision_trees: bool = False
     binary_threshold: float = 0.1
     previous_layers_as_input: bool = False
+    binary_dt: bool = False
 
     intervention_layers = []
 
