@@ -716,7 +716,7 @@ def compute_predictors_iterative(
     custom_functions: list[Callable],
     num_cores: int,
     layers: list[int],
-    data: dict,
+    train_data: dict,
     neuron_acts: dict,
     binary_acts: dict,
     input_location: str,
@@ -724,6 +724,7 @@ def compute_predictors_iterative(
     force_recompute: bool,
     save_results: bool,
     max_depth: int,
+    threshold_f1: float,
 ) -> dict:
 
     output_filename = f"decision_trees/decision_trees_{input_location}_{dataset_size}.pkl"
@@ -738,20 +739,21 @@ def compute_predictors_iterative(
     num_cores = min(num_cores, multiprocessing.cpu_count())
 
     results = {}
+    rule_neurons_act_all_layers = torch.tensor([], device=device)
 
     for layer in layers:
         results[layer] = {}
 
     for custom_function in custom_functions:
 
-        print(f"\n{custom_function.__name__}")
-        games_input_features = {}
-        games_input_features[0] = data[custom_function.__name__]
-        games_input_features[0] = utils.to_device(games_input_features[0], "cpu")
+        # print(f"\n{custom_function.__name__}")
+        # games_input_features = {}
+        # games_input_features[0] = train_data[custom_function.__name__]
+        # games_input_features[0] = utils.to_device(games_input_features[0], "cpu")
 
         for layer in range(8):
             layer_result = process_layer(
-                layer, games_input_features[layer], neuron_acts, binary_acts, max_depth=max_depth
+                layer, train_data[layer], neuron_acts, binary_acts, max_depth=max_depth
             )
             layer = layer_result["layer"]
             results[layer][custom_function.__name__] = {
@@ -761,19 +763,48 @@ def compute_predictors_iterative(
 
             rule_neurons_mask = (
                 results[layer][str(custom_function.__name__)]["binary_decision_tree"]["f1"]
-                > threshold
+                > threshold_f1
             )
-            print(f"Layer {layer} Rule Neurons: {rule_neurons_mask.sum()}")
-            rule_neurons = binary_acts[layer][:, :, rule_neurons_mask]
-            if layer < 7:
-                games_input_features[layer + 1] = torch.cat(
-                    [games_input_features[layer], rule_neurons], dim=-1
+            # print(f"Layer {layer} Rule Neurons: {rule_neurons_mask.sum()}")
+            rule_neurons_act = binary_acts[layer][:, :, rule_neurons_mask]
+            rule_neurons_act_all_layers = torch.cat([rule_neurons_act_all_layers, rule_neurons_act], dim=-1)
+            if layer < max(layers):
+                train_data[layer + 1][custom_function.__name__] = torch.cat(
+                    [train_data[layer + 1][custom_function.__name__], rule_neurons_act_all_layers], dim=-1
                 )
 
     if save_results:
         with open(output_filename, "wb") as f:
             pickle.dump(results, f)
     return results
+
+
+def append_binary_neuron_activations_to_test_data(
+    test_data: dict,
+    test_binary_acts: dict,
+    decision_tree_results: dict,
+    threshold_f1: float,
+    layers: list[int],
+) -> dict:
+    
+    rule_neurons_act_all_layers = []
+
+    for layer in decision_tree_results:
+
+        for custom_function_name in decision_tree_results[layer]:
+
+            rule_neurons_mask = (
+                decision_tree_results[layer][custom_function_name]["binary_decision_tree"]["f1"]
+                > threshold_f1
+            )
+            rule_neurons_act = test_binary_acts[layer][:, :, rule_neurons_mask]
+            rule_neurons_act_all_layers = torch.cat([rule_neurons_act_all_layers, rule_neurons_act], dim=-1)
+
+            if layer < max(layers):
+                test_data[layer + 1][custom_function_name] = torch.cat(
+                    [test_data[layer + 1][custom_function_name], rule_neurons_act_all_layers], dim=-1
+                )
+    return test_data
 
 
 def perform_interventions(
@@ -949,20 +980,45 @@ def run_simulations(config: sim_config.SimulationConfig):
             results = {"hyperparameters": individual_hyperparameters, "results": {}}
 
             if ablation_method == "dt":
-                decision_trees = compute_predictors(
-                    custom_functions=config.custom_functions,
-                    num_cores=config.num_cores,
-                    layers=config.layers,
-                    data=train_data,
-                    neuron_acts=neuron_acts,
-                    binary_acts=binary_acts,
-                    input_location=input_location,
-                    dataset_size=dataset_size,
-                    force_recompute=config.force_recompute,
-                    save_results=config.save_decision_trees,
-                    max_depth=config.max_depth,
-                    output_location=config.output_location,
-                )
+                if not config.previous_layers_as_input:
+                    decision_trees = compute_predictors(
+                        custom_functions=config.custom_functions,
+                        num_cores=config.num_cores,
+                        layers=config.layers,
+                        data=train_data,
+                        neuron_acts=neuron_acts,
+                        binary_acts=binary_acts,
+                        input_location=input_location,
+                        dataset_size=dataset_size,
+                        force_recompute=config.force_recompute,
+                        save_results=config.save_decision_trees,
+                        max_depth=config.max_depth,
+                        output_location=config.output_location,
+                    )
+                else: # Adds neuron activations as input features to decision trees for downstream layers
+                    decision_trees = compute_predictors_iterative(
+                        custom_functions=config.custom_functions,
+                        num_cores=config.num_cores,
+                        layers=config.layers,
+                        data=train_data,
+                        neuron_acts=neuron_acts,
+                        binary_acts=binary_acts,
+                        input_location=input_location,
+                        dataset_size=dataset_size,
+                        force_recompute=config.force_recompute,
+                        save_results=config.save_decision_trees,
+                        max_depth=config.max_depth,
+                        output_location=config.output_location,
+                        threshold_f1=config.intervention_threshold,
+                    )
+                    #add function that adds the neuron activations to the test data
+                    test_data = append_binary_neuron_activations_to_test_data(
+                        test_data,
+                        binary_acts,
+                        decision_trees,
+                        config.intervention_threshold,
+                        config.layers,
+                    )
 
                 for layer in decision_trees:
                     results["results"][layer] = {}
