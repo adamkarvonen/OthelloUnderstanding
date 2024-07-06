@@ -446,6 +446,12 @@ def games_batch_to_input_tokens_flipped_bs_valid_moves_classifier_input_BLC(
     return t.cat([input_bs_flipped_BLC, valid_moves_BLC], dim=-1)
 
 
+def games_batch_to_input_tokens_flipped_bs_bs_probe_classifier_input_BLC(
+    batch_str_moves: list[list[int]],
+) -> t.Tensor:
+    return games_batch_to_input_tokens_flipped_bs_classifier_input_BLC(batch_str_moves)
+
+
 def games_batch_to_input_tokens_flipped_bs_valid_moves_probe_classifier_input_BLC(
     batch_str_moves: list[list[int]],
 ) -> t.Tensor:
@@ -560,4 +566,5 @@ probe_input_functions = [
     games_batch_to_input_tokens_flipped_bs_valid_moves_bs_probe_classifier_input_BLC.__name__,
     games_batch_to_input_tokens_flipped_bs_valid_moves_vm_probe_classifier_input_BLC.__name__,
     games_batch_to_probe_classifier_input_BLC.__name__,
+    games_batch_to_input_tokens_flipped_bs_bs_probe_classifier_input_BLC.__name__,
 ]
