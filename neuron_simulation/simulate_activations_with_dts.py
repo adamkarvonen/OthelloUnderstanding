@@ -95,10 +95,11 @@ def load_model_and_data(
 def load_probe_dict(device: str, num_layers: int, custom_function: Callable) -> dict:
     probe_dict = {}
     for layer in range(num_layers):
+        # Only use mine / yours probe for now
         if (
             custom_function
             == othello_utils.games_batch_to_input_tokens_flipped_bs_valid_moves_bs_probe_classifier_input_BLC
-        ):
+        ) or True:
             linear_probe_name = (
                 f"Othello-GPT-Transformer-Lens_othello_mine_yours_probe_layer_{layer}.pth"
             )
@@ -603,6 +604,7 @@ def interventions(
     submodule_dict: dict,
     layers: list[int],
     input_location: str,
+    simulated_activations: dict,
     ablation_method: str = "zero",
     decision_trees: Optional[dict] = None,
     custom_function: Optional[Callable] = None,
@@ -615,29 +617,8 @@ def interventions(
     ), f"Invalid ablation method. Must be one of {allowed_methods}"
     game_batch_BL = torch.tensor(train_data["encoded_inputs"])
 
-    simulated_activations = {}
     mean_activations = {}
     max_activations = {}
-
-    if ablation_method == "dt":
-
-        for layer in layers:
-
-            board_state_BLC = train_data[layer][custom_function.__name__]
-            B, L, C = board_state_BLC.shape
-            X = einops.rearrange(board_state_BLC, "b l c -> (b l) c").cpu().numpy()
-
-            decision_tree = decision_trees[layer][custom_function.__name__]["decision_tree"][
-                "model"
-            ]
-            simulated_activations_BF = decision_tree.predict(X)
-            simulated_activations_BF = torch.tensor(
-                simulated_activations_BF, device=device, dtype=torch.float32
-            )
-            simulated_activations_BLF = einops.rearrange(
-                simulated_activations_BF, "(b l) f -> b l f", b=B, l=L
-            )
-            simulated_activations[layer] = simulated_activations_BLF
 
     # Get clean logits and mean submodule activations
     with torch.no_grad(), model.trace(game_batch_BL, **tracer_kwargs):
@@ -839,10 +820,13 @@ def compute_predictors_iterative(
             )
             # print(f"Layer {layer} Rule Neurons: {rule_neurons_mask.sum()}")
             rule_neurons_act = binary_acts[layer][:, :, rule_neurons_mask]
-            rule_neurons_act_all_layers = torch.cat([rule_neurons_act_all_layers, rule_neurons_act], dim=-1)
+            rule_neurons_act_all_layers = torch.cat(
+                [rule_neurons_act_all_layers, rule_neurons_act], dim=-1
+            )
             if layer < max(layers):
                 train_data[layer + 1][custom_function.__name__] = torch.cat(
-                    [train_data[layer + 1][custom_function.__name__], rule_neurons_act_all_layers], dim=-1
+                    [train_data[layer + 1][custom_function.__name__], rule_neurons_act_all_layers],
+                    dim=-1,
                 )
 
     if save_results:
@@ -858,7 +842,7 @@ def append_binary_neuron_activations_to_test_data(
     threshold_f1: float,
     layers: list[int],
 ) -> dict:
-    
+
     rule_neurons_act_all_layers = []
 
     for layer in decision_tree_results:
@@ -870,13 +854,41 @@ def append_binary_neuron_activations_to_test_data(
                 > threshold_f1
             )
             rule_neurons_act = test_binary_acts[layer][:, :, rule_neurons_mask]
-            rule_neurons_act_all_layers = torch.cat([rule_neurons_act_all_layers, rule_neurons_act], dim=-1)
+            rule_neurons_act_all_layers = torch.cat(
+                [rule_neurons_act_all_layers, rule_neurons_act], dim=-1
+            )
 
             if layer < max(layers):
                 test_data[layer + 1][custom_function_name] = torch.cat(
-                    [test_data[layer + 1][custom_function_name], rule_neurons_act_all_layers], dim=-1
+                    [test_data[layer + 1][custom_function_name], rule_neurons_act_all_layers],
+                    dim=-1,
                 )
     return test_data
+
+
+def simulate_activations(
+    data: dict, decision_trees: dict, intervention_layers: list[list[int]], func_name: str
+) -> dict[int, torch.Tensor]:
+    simulated_activations = {}
+    all_layers = list(set(int for sublist in intervention_layers for int in sublist))
+
+    for layer in all_layers:
+
+        board_state_BLC = data[layer][func_name]
+        B, L, C = board_state_BLC.shape
+        X = einops.rearrange(board_state_BLC, "b l c -> (b l) c").cpu().numpy()
+
+        decision_tree = decision_trees[layer][func_name]["decision_tree"]["model"]
+        simulated_activations_BF = decision_tree.predict(X)
+        simulated_activations_BF = torch.tensor(
+            simulated_activations_BF, device=device, dtype=torch.float32
+        )
+        simulated_activations_BLF = einops.rearrange(
+            simulated_activations_BF, "(b l) f -> b l f", b=B, l=L
+        )
+        simulated_activations[layer] = simulated_activations_BLF
+
+    return simulated_activations
 
 
 def perform_interventions(
@@ -908,7 +920,17 @@ def perform_interventions(
     else:
         d_model = 512
 
-    for custom_function in custom_functions:
+    for idx, custom_function in enumerate(custom_functions):
+
+        simulated_activations = {}
+        if ablation_method == "dt":
+            simulated_activations = simulate_activations(
+                data, decision_trees, intervention_layers, custom_function.__name__
+            )
+        else:
+            # If e.g. mean ablating, we don't need to mean ablate for every custom function
+            if idx > 0:
+                continue
 
         for selected_layers in intervention_layers:
 
@@ -925,7 +947,6 @@ def perform_interventions(
                     all_f1s = decision_trees[layer][custom_function.__name__]["decision_tree"]["r2"]
                     good_f1s = all_f1s > threshold
                     selected_features[layer] = good_f1s
-                    print(good_f1s.shape, good_f1s.dtype, good_f1s.sum())
                 else:
                     raise ValueError(f"Invalid ablation method: {ablation_method}")
 
@@ -938,6 +959,7 @@ def perform_interventions(
                 submodule_dict=submodule_dict,
                 custom_function=custom_function,
                 layers=selected_layers,
+                simulated_activations=simulated_activations,
                 ablation_method=ablation_method,
                 ablate_not_selected=ablate_not_selected,
                 add_error=add_error,
@@ -954,9 +976,19 @@ def perform_interventions(
                 logits_patch_BLV, data["valid_moves"]
             )
 
+            print(
+                f"\nablation_method: {ablation_method}, ablate_not_selected: {ablate_not_selected}, add_error: {add_error}"
+            )
+            print(
+                f"selected_layers: {selected_layers}, input_location: {input_location}, custom_function: {custom_function.__name__}"
+            )
             print(kl_div_BL.mean())
             print(clean_accuracy)
             print(patch_accuracy)
+
+            for layer in selected_features:
+                good_f1s = selected_features[layer]
+                print(good_f1s.shape, good_f1s.dtype, good_f1s.sum())
 
             assert clean_total == patch_total
 
@@ -1108,8 +1140,8 @@ def run_simulations(config: sim_config.SimulationConfig):
                         max_depth=config.max_depth,
                         output_location=config.output_location,
                         binary_dt=config.binary_dt,
-                )
-                else: # Adds neuron activations as input features to decision trees for downstream layers
+                    )
+                else:  # Adds neuron activations as input features to decision trees for downstream layers
                     decision_trees = compute_predictors_iterative(
                         custom_functions=config.custom_functions,
                         num_cores=config.num_cores,
@@ -1125,7 +1157,7 @@ def run_simulations(config: sim_config.SimulationConfig):
                         output_location=config.output_location,
                         threshold_f1=config.intervention_threshold,
                     )
-                    #add function that adds the neuron activations to the test data
+                    # add function that adds the neuron activations to the test data
                     test_data = append_binary_neuron_activations_to_test_data(
                         test_data,
                         binary_acts,
