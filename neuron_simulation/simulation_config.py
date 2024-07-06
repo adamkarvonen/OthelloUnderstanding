@@ -17,7 +17,7 @@ SAE_config = InterventionCombination(
     input_location="CHANGE_ME",
     ablation_method="dt",
     trainer_ids=list(range(21)),
-    ablate_not_selected=[True, False],
+    ablate_not_selected=[True],
     add_error=[True, False],
 )
 
@@ -44,7 +44,7 @@ MLP_dt_config = InterventionCombination(
     input_location="mlp_neuron",
     ablation_method="dt",
     trainer_ids=[0],
-    ablate_not_selected=[True, False],
+    ablate_not_selected=[True],
     add_error=[True],
 )
 
