@@ -1,3 +1,4 @@
+from ast import main
 from dataclasses import dataclass
 from huggingface_hub import hf_hub_download
 import torch
@@ -12,6 +13,7 @@ import os
 from tqdm import tqdm
 from transformers import GPT2LMHeadModel
 from transformer_lens import HookedTransformer
+from transformer_lens import utils as tl_utils
 from enum import Enum
 from typing import Optional, Union
 import pandas as pd
@@ -27,13 +29,13 @@ from circuits.dictionary_learning.dictionary import (
 
 # These imports are required for the current hacky way we are loading SAE classes
 from circuits.dictionary_learning.dictionary import AutoEncoder, GatedAutoEncoder, AutoEncoderNew
+from circuits.dictionary_learning.trainers.top_k import AutoEncoderTopK
 from circuits.dictionary_learning.trainers.gated_anneal import GatedAnnealTrainer
 from circuits.dictionary_learning.trainers.gdm import GatedSAETrainer
 from circuits.dictionary_learning.trainers.p_anneal import PAnnealTrainer
-from circuits.dictionary_learning.trainers.p_anneal_new import PAnnealTrainerNew
 from circuits.dictionary_learning.trainers.standard import StandardTrainer
-from circuits.dictionary_learning.trainers.p_anneal_new import PAnnealTrainerNew
-from circuits.dictionary_learning.trainers.standard_new import StandardTrainerNew
+# from circuits.dictionary_learning.trainers.p_anneal_new import PAnnealTrainerNew
+# from circuits.dictionary_learning.trainers.standard_new import StandardTrainerNew
 
 
 @dataclass
@@ -55,6 +57,13 @@ class SubmoduleType(Enum):
 def get_model(model_name: str, device: torch.device) -> NNsight:
     if model_name == "Baidicoot/Othello-GPT-Transformer-Lens":
         tf_model = HookedTransformer.from_pretrained("Baidicoot/Othello-GPT-Transformer-Lens")
+        model = NNsight(tf_model).to(device)
+        return model
+    
+    if model_name == "mntss/Othello-GPT":
+        tf_model = HookedTransformer.from_pretrained_no_processing("Baidicoot/Othello-GPT-Transformer-Lens")
+        state_dict = tl_utils.download_file_from_hf("mntss/Othello-GPT", "tl_model.pth")
+        tf_model.load_state_dict(state_dict)
         model = NNsight(tf_model).to(device)
         return model
 
@@ -80,7 +89,7 @@ def get_model(model_name: str, device: torch.device) -> NNsight:
 
 
 def get_mlp_activations_submodule(model_name: str, layer: int, model: NNsight) -> Any:
-    if model_name == "Baidicoot/Othello-GPT-Transformer-Lens":
+    if model_name in ["Baidicoot/Othello-GPT-Transformer-Lens", "mntss/Othello-GPT"]:
         return model.blocks[layer].mlp.hook_post
     if model_name in [
         "adamkarvonen/8LayerChessGPT2",
@@ -92,7 +101,7 @@ def get_mlp_activations_submodule(model_name: str, layer: int, model: NNsight) -
 
 
 def get_resid_post_submodule(model_name: str, layer: int, model: NNsight) -> Any:
-    if model_name == "Baidicoot/Othello-GPT-Transformer-Lens":
+    if model_name in ["Baidicoot/Othello-GPT-Transformer-Lens", "mntss/Othello-GPT"]:
         return model.blocks[layer].hook_resid_post
     if model_name in [
         "adamkarvonen/8LayerChessGPT2",
@@ -463,11 +472,14 @@ def get_single_ae(
         ae = GatedAutoEncoder.from_pretrained(os.path.join(full_path, "ae.pt"), device=device)
     elif ae_type == "standard_new":
         ae = AutoEncoderNew.from_pretrained(os.path.join(full_path, "ae.pt"), device=device)
+    elif ae_type == "topk":
+        config = tl_utils.download_file_from_hf("mntss/Othello-SAEs", os.path.join(full_path, "config.json"))
+        state_dict = tl_utils.download_file_from_hf("mntss/Othello-SAEs", os.path.join(full_path, "ae.pt"))
+        return AutoEncoderTopK.from_pretrained(state_dict, config['trainer']['k'], device=device)
     elif ae_type == "identity":
         ae = IdentityDict()
     else:
         raise ValueError("Invalid ae_type")
-
     return ae
 
 
@@ -518,11 +530,16 @@ def get_ae(
         ae_group_dir = f"{repo_dir}autoencoders/{ae_group_name}"
         ae_type = "identity"
         ae_path = f"{ae_group_dir}/layer_{layer}"
+    elif node_type == "sae_feature_topk":
+        assert ae_group_name is None
+        ae_group_dir = None
+        ae_type = "topk"
+        ae_path = f"resid_post/layer_{layer}/trainer_{trainer_id}"
     else:
         raise ValueError("Invalid node_type")
 
     # download data from huggingface if needed
-    if not os.path.exists(f"{repo_dir}autoencoders/{ae_group_name}"):
+    if not os.path.exists(f"{repo_dir}autoencoders/{ae_group_name}") and ae_group_name is not None:
         hf_hub_download(
             repo_id="adamkarvonen/othello_saes",
             filename=f"{ae_group_name}.zip",

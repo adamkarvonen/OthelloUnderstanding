@@ -1,4 +1,7 @@
 [submodule "circuits/dictionary_learning"]
 	path = circuits/dictionary_learning
-	url = https://github.com/saprmarks/dictionary_learning.git
-	branch = collab
+	url = https://github.com/mntss/dictionary_learning.git
+	branch = batchtokp_aux_fix
+[submodule "circuits/feature_circuits"]
+	path = circuits/feature_circuits
+	url = https://github.com/saprmarks/feature-circuits.git

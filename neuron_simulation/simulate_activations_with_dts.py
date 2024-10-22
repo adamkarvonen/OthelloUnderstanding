@@ -28,7 +28,6 @@ import neuron_simulation.simulation_config as sim_config
 
 # Setup
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
-device = "cpu"
 torch.set_grad_enabled(False)
 tracer_kwargs = {"validate": False, "scan": False}
 tracer_kwargs = {"validate": True, "scan": True}
@@ -220,7 +219,7 @@ def get_submodule_dict(model, model_name: str, layers: list, input_location: str
     submodule_dict = {}
 
     for layer in layers:
-        if input_location == "sae_feature":
+        if input_location in ["sae_feature", "sae_feature_topk"]:
             submodule = utils.get_resid_post_submodule(model_name, layer, model)
         elif input_location == "sae_mlp_feature":
             submodule = utils.get_mlp_activations_submodule(model_name, layer, model)
@@ -239,6 +238,7 @@ def get_submodule_dict(model, model_name: str, layers: list, input_location: str
     return submodule_dict
 
 
+@torch.no_grad()
 def cache_sae_activations(
     model,
     data: dict,
@@ -257,9 +257,10 @@ def cache_sae_activations(
         data_batch = data["encoded_inputs"][batch_start:batch_end]
         data_batch = torch.tensor(data_batch, device=device)
 
-        with torch.no_grad(), model.trace(data_batch, **tracer_kwargs):
+        ae_dict = utils.to_device(ae_dict, 'cuda')        
+        acts = {}
+        with model.trace(data_batch, **tracer_kwargs):
             for layer in layers:
-                ae = ae_dict[layer]
                 submodule = submodule_dict[layer]
                 if input_location != "transcoder":
                     x = submodule.output
@@ -267,8 +268,12 @@ def cache_sae_activations(
                     x = submodule.input[0]
                     if type(submodule.input.shape) == tuple:
                         x = x[0]
-                f = ae.encode(x)
-                sae_acts[layer].append(f.save())
+                acts[layer] = x.save()
+
+        for layer in layers:
+            ae = ae_dict[layer]
+            f = ae.encode(acts[layer])
+            sae_acts[layer].append(f.detach().cpu())
 
     for layer in sae_acts:
         sae_acts[layer] = torch.stack(sae_acts[layer])
@@ -279,7 +284,7 @@ def cache_sae_activations(
 
 def get_max_activations(neuron_acts: dict, layer: int) -> torch.Tensor:
     D = neuron_acts[layer].shape[-1]
-    max_activations_D = torch.full((D,), float("-inf"), device=device)
+    max_activations_D = torch.full((D,), float("-inf"), device=neuron_acts[layer].device)
 
     neuron_acts_BLD = neuron_acts[layer]
     neuron_acts_BD = einops.rearrange(neuron_acts_BLD, "b l d -> (b l) d")
@@ -708,6 +713,9 @@ def compute_predictors(
     output_filename = (
         f"{output_location}decision_trees/decision_trees_{input_location}_{dataset_size}.pkl"
     )
+
+    output_dir = os.path.dirname(output_filename)
+    os.makedirs(output_dir, exist_ok=True)
 
     if not force_recompute and os.path.exists(output_filename):
         print(f"Loading decision trees from {output_filename}")
