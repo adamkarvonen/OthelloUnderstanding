@@ -57,7 +57,6 @@ def construct_dataset_per_layer(
     all_data["valid_moves"] = data[othello_utils.games_batch_to_valid_moves_BLRRC.__name__].clone()
 
     for layer in layers:
-
         if layer not in all_data:
             all_data[layer] = {}
 
@@ -257,7 +256,7 @@ def cache_sae_activations(
         data_batch = data["encoded_inputs"][batch_start:batch_end]
         data_batch = torch.tensor(data_batch, device=device)
 
-        ae_dict = utils.to_device(ae_dict, 'cuda')        
+        ae_dict = utils.to_device(ae_dict, "cuda")
         acts = {}
         with model.trace(data_batch, **tracer_kwargs):
             for layer in layers:
@@ -272,6 +271,7 @@ def cache_sae_activations(
 
         for layer in layers:
             ae = ae_dict[layer]
+
             f = ae.encode(acts[layer])
             sae_acts[layer].append(f.detach().cpu())
 
@@ -499,7 +499,6 @@ def process_layer(
     regular_dt: bool = True,
     random_seed: int = 42,
 ) -> dict:
-
     print(f"\nLayer {layer}")
 
     games_BLC = data[layer][func_name]
@@ -573,7 +572,6 @@ def process_layer_xgb(
     binary_acts: dict,
     linear_reg: bool = False,
 ) -> dict:
-
     print(f"\nLayer {layer}")
     X_train, X_test, y_train, y_test = prepare_data(games_BLC, neuron_acts[layer])
 
@@ -617,9 +615,9 @@ def interventions(
     add_error: bool = False,
 ):
     allowed_methods = ["mean", "zero", "max", "dt"]
-    assert (
-        ablation_method in allowed_methods
-    ), f"Invalid ablation method. Must be one of {allowed_methods}"
+    assert ablation_method in allowed_methods, (
+        f"Invalid ablation method. Must be one of {allowed_methods}"
+    )
     game_batch_BL = torch.tensor(train_data["encoded_inputs"])
 
     mean_activations = {}
@@ -651,7 +649,6 @@ def interventions(
     # Get patch logits
     with torch.no_grad(), model.trace(game_batch_BL, **tracer_kwargs):
         for layer in layers:
-
             submodule = submodule_dict[layer]
             ae = ae_dict[layer]
             original_output_BLD = submodule.output
@@ -709,7 +706,6 @@ def compute_predictors(
     output_location: str,
     binary_dt: bool,
 ) -> dict:
-
     output_filename = (
         f"{output_location}decision_trees/decision_trees_{input_location}_{dataset_size}.pkl"
     )
@@ -787,7 +783,6 @@ def compute_predictors_iterative(
     max_depth: int,
     threshold_f1: float,
 ) -> dict:
-
     output_filename = f"decision_trees/decision_trees_{input_location}_{dataset_size}.pkl"
 
     if not force_recompute and os.path.exists(output_filename):
@@ -806,7 +801,6 @@ def compute_predictors_iterative(
         results[layer] = {}
 
     for custom_function in custom_functions:
-
         # print(f"\n{custom_function.__name__}")
         # games_input_features = {}
         # games_input_features[0] = train_data[custom_function.__name__]
@@ -850,13 +844,10 @@ def append_binary_neuron_activations_to_test_data(
     threshold_f1: float,
     layers: list[int],
 ) -> dict:
-
     rule_neurons_act_all_layers = []
 
     for layer in decision_tree_results:
-
         for custom_function_name in decision_tree_results[layer]:
-
             rule_neurons_mask = (
                 decision_tree_results[layer][custom_function_name]["binary_decision_tree"]["f1"]
                 > threshold_f1
@@ -881,7 +872,6 @@ def simulate_activations(
     all_layers = list(set(int for sublist in intervention_layers for int in sublist))
 
     for layer in all_layers:
-
         board_state_BLC = data[layer][func_name]
         B, L, C = board_state_BLC.shape
         X = einops.rearrange(board_state_BLC, "b l c -> (b l) c").cpu().numpy()
@@ -914,7 +904,6 @@ def perform_interventions(
     submodule_dict: dict,
     hyperparameters: dict,
 ):
-
     ablations = {"results": {}}
 
     if input_location == "mlp_neuron":
@@ -929,7 +918,6 @@ def perform_interventions(
         d_model = 512
 
     for idx, custom_function in enumerate(custom_functions):
-
         simulated_activations = {}
         if ablation_method == "dt":
             simulated_activations = simulate_activations(
@@ -941,7 +929,6 @@ def perform_interventions(
                 continue
 
         for selected_layers in intervention_layers:
-
             selected_features = {}
 
             for layer in selected_layers:
@@ -990,13 +977,15 @@ def perform_interventions(
             print(
                 f"selected_layers: {selected_layers}, input_location: {input_location}, custom_function: {custom_function.__name__}"
             )
-            print(kl_div_BL.mean())
-            print(clean_accuracy)
-            print(patch_accuracy)
+            print(f"{kl_div_BL.mean()} Mean KL div (lower is better)")
+            print(f"{clean_accuracy} Original model legal move accuracy (should be ~0.9998)")
+            print(f"{patch_accuracy} Patch intervention (higher is better)")
 
             for layer in selected_features:
                 good_f1s = selected_features[layer]
-                print(good_f1s.shape, good_f1s.dtype, good_f1s.sum())
+                print(
+                    f"Out of {good_f1s.shape[0]} neurons, {good_f1s.sum()} can be fit well by a decision tree"
+                )
 
             assert clean_total == patch_total
 
@@ -1007,17 +996,17 @@ def perform_interventions(
             if custom_function.__name__ not in ablations["results"][layers_key]:
                 ablations["results"][layers_key][custom_function.__name__] = {}
 
-            ablations["results"][layers_key][custom_function.__name__][
-                "kl"
-            ] = kl_div_BL.mean().cpu()
+            ablations["results"][layers_key][custom_function.__name__]["kl"] = (
+                kl_div_BL.mean().cpu()
+            )
 
-            ablations["results"][layers_key][custom_function.__name__][
-                "clean_accuracy"
-            ] = clean_accuracy
+            ablations["results"][layers_key][custom_function.__name__]["clean_accuracy"] = (
+                clean_accuracy
+            )
 
-            ablations["results"][layers_key][custom_function.__name__][
-                "patch_accuracy"
-            ] = patch_accuracy
+            ablations["results"][layers_key][custom_function.__name__]["patch_accuracy"] = (
+                patch_accuracy
+            )
 
     hyperparameters["ablation_method"] = ablation_method
     hyperparameters["ablate_not_selected"] = ablate_not_selected
@@ -1052,7 +1041,6 @@ def update_results_dict(output_file: str, results: dict):
 
 
 def run_simulations(config: sim_config.SimulationConfig):
-
     add_output_folders()
 
     dataset_size = config.n_batches * config.batch_size
@@ -1092,7 +1080,6 @@ def run_simulations(config: sim_config.SimulationConfig):
             )
 
     for combination in config.combinations:
-
         input_location = combination.input_location
         trainer_ids = combination.trainer_ids
         ablation_method = combination.ablation_method
@@ -1102,10 +1089,13 @@ def run_simulations(config: sim_config.SimulationConfig):
         true_false_combinations = list(itertools.product(ablate_not_selected, add_error))
 
         for trainer_id in trainer_ids:
-
-            ae_dict = utils.get_aes(
+            ae_list = utils.get_aes(
                 node_type=input_location, repo_dir=config.repo_dir, trainer_id=trainer_id
             )
+
+            for i in range(len(ae_list)):
+                ae_list[i] = ae_list[i].to(device)
+
             submodule_dict = get_submodule_dict(
                 model, config.model_name, config.layers, input_location
             )
@@ -1117,7 +1107,7 @@ def run_simulations(config: sim_config.SimulationConfig):
                 config.batch_size,
                 config.n_batches,
                 input_location,
-                ae_dict,
+                ae_list,
                 submodule_dict,
             )
 
@@ -1203,7 +1193,6 @@ def run_simulations(config: sim_config.SimulationConfig):
                 decision_trees = None
 
             for combo in true_false_combinations:
-
                 ablate_not_selected, add_error = combo
 
                 ablations = perform_interventions(
@@ -1217,7 +1206,7 @@ def run_simulations(config: sim_config.SimulationConfig):
                     intervention_layers=config.intervention_layers,
                     data=test_data,
                     threshold=config.intervention_threshold,
-                    ae_dict=ae_dict,
+                    ae_dict=ae_list,
                     submodule_dict=submodule_dict,
                     hyperparameters=individual_hyperparameters.copy(),
                 )
@@ -1227,27 +1216,36 @@ def run_simulations(config: sim_config.SimulationConfig):
 
 
 if __name__ == "__main__":
+    import time
+
+    start_time = time.time()
     default_config = sim_config.selected_config
     # default_config = sim_config.test_config
 
+    # Here you select which functions are going to be used as input to training the decision trees
+    # We will iterate over every one
     default_config.custom_functions = [
         # othello_utils.games_batch_to_input_tokens_flipped_bs_valid_moves_bs_probe_classifier_input_BLC,
         # othello_utils.games_batch_to_input_tokens_flipped_bs_valid_moves_classifier_input_BLC,
-        # othello_utils.games_batch_to_input_tokens_flipped_classifier_input_BLC,
+        othello_utils.games_batch_to_input_tokens_flipped_bs_classifier_input_BLC,
         # othello_utils.games_batch_to_previous_board_state_classifier_input_BLC,
         # othello_utils.games_batch_to_board_state_classifier_input_BLC,
-        othello_utils.games_batch_to_input_tokens_flipped_classifier_input_BLC,
+        # othello_utils.games_batch_to_input_tokens_flipped_classifier_input_BLC,
         # othello_utils.games_batch_to_probe_classifier_input_BLC,
     ]
 
-    # default_config.combinations = [
-    #     sim_config.selected_sae_mlp_out_feature_config,
-    #     sim_config.selected_transcoder_config,
-    #     sim_config.MLP_dt_config,
-    #     sim_config.MLP_mean_config,
-    # ]
+    # Here you select what types of interventions will be performed
+    # E.g. decision trees on SAEs on mlp out, mean ablation, decision trees on MLP neurons
+    default_config.combinations = [
+        # sim_config.selected_sae_mlp_out_feature_config,
+        # sim_config.selected_transcoder_config,
+        sim_config.MLP_dt_config,
+        sim_config.MLP_mean_config,
+    ]
 
     # example config change
-    default_config.n_batches = 1
+    # 6 batches seems to work reasonably well for training decision trees
+    default_config.n_batches = 6
     # default_config.batch_size = 10
     run_simulations(default_config)
+    print(f"--- {time.time() - start_time} seconds ---")

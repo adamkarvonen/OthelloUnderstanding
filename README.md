@@ -1,16 +1,85 @@
 **Setup** 
 
-Create a new virtual python environment (I'm using 3.11) and run `./setup.sh`, or run each command in `setup.sh` individually. This will install all requirements, installs the project in editable mode, and check out the correct branch of the `dictionary_learning` submodule. By default, the repo includes an example Chess and Othello SAE. If you want to download sweeps of SAEs for analysis, refer to `autoencoders/download_saes.sh`.
+Create a new virtual python environment (I'm using 3.11).
 
-**Getting Started**
+```
 
-There is a walkthrough of the approach in `circuits/full_pipeline_walkthrough.ipynb`.
+pip install -r requirements.txt
+pip install -e .
+git submodule update --init --recursive
 
-To perform the analysis in the paper, run `python full_pipeline.py`. By default, it runs on the single Chess SAE in `autoencoders/testing_chess`. It takes a few minutes on an RTX 3090 and uses < 10GB of VRAM. By decreasing the batch size, it can run using < 2 GB of VRAM if necessary. At the bottom of the script, you can select which autoencoder groups you want to analyze. The output of `full_pipeline.py` for the default autoencoder group is `f1_results.csv` at `autoencoders/testing_chess`.
+# Some python scripts will download zipped SAEs off huggingface, this isn't needed by default
+apt install zip
+apt install unzip
+```
 
-The `full_pipeline` can be ran on SAE feature activations or MLP neuron activations on both ChessGPT and OthelloGPT. You just have to select the autoencoder group path, and everything else should happen automatically. Refer to `circuits/pipeline_config.py` to set config values and for explanations of their purpose. To decrease runtime, we support parallel analysis on multiple GPUs. This can also be set in `pipeline_config.py`.
+Then run `python neuron_simulation/simulate_activations_with_dts.py`.
 
-This location of this `f1_results.csv` is already set in `f1_analysis.ipynb` to recreate all graphs from the paper. The data used to create the graphs from our paper can be found in `autoencoders/saved_data`.
+Claude generated explanation of repo:
+
+# Othello-GPT Interpretable Neurons
+
+This repository contains research work on identifying and utilizing interpretable neurons in Othello-GPT using depth-limited decision trees.
+
+## Project Overview
+
+We identify interpretable neurons in Othello-GPT by training shallow decision trees (depth-5) to approximate their behavior. The decision trees provide inherent interpretability while maintaining reasonable performance. We then use these interpretable approximations to replace parts of the original model and evaluate the impact.
+
+## Data Processing
+
+The project processes Othello game data into PyTorch tensors with custom functions that capture various game aspects:
+- Squares flipped by the most recent move
+- History of moves played
+- Current board state (white and black pieces)
+
+These tensors serve as inputs for training the decision trees. We have various custom functions that can be used:
+
+`games_batch_to_board_state_classifier_input_BLC`: Which squares are mine, yours, or blank.
+`games_batch_to_input_tokens_flipped_bs_classifier_input_BLC`: Which moves have been played, which squares were flipped by the most recent move, and the board state.
+Many others.
+
+## Training Process
+
+The training process is relatively lightweight:
+- Typically requires only ~60 games for good decision tree performance
+- Training completes in a few minutes
+- Decision trees are trained in parallel across all 8 layers
+- Training happens on CPU
+
+### Resource Requirements
+- Minimum 8 CPU cores (for parallel training across layers)
+- Peak GPU memory usage is approximately 2GB
+- Can run entirely on CPU (including model inference)
+
+## Key Features
+
+### Neuron Selection
+- We identify neurons that can be explained by decision trees above an R-squared threshold (e.g., 0.7)
+- Some layers show high interpretability, with 30-40% of MLP neurons being well-explained
+
+### Model Modification Flags
+- `ablate_not_selected`: (Recommended: True) Ablates unexplained neurons while replacing explained ones with decision trees
+- `add_error`: Applies to SAEs, determines whether to include the error term
+
+### Performance Metrics
+We evaluate modified models using:
+- KL divergence from original model
+- Legal move prediction accuracy (original model achieves 99.98% accuracy)
+- Comparison against mean ablation baseline
+
+## Current Results
+
+The modified model currently:
+- Outperforms mean ablation baseline
+- Shows lower performance than the original model
+- Successfully maintains some of the original model's capabilities while using interpretable components
+
+## Implementation Example
+
+For example, in a model with 2,000 MLP neurons where 1,000 are well-explained by decision trees:
+1. The well-explained neurons are replaced with their decision tree approximations
+2. The remaining 1,000 unexplained neurons are ablated (when `ablate_not_selected=True`)
+3. Performance metrics are calculated to evaluate the impact
 
 **Shape Annotations**
 
